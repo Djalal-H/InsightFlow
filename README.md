@@ -27,7 +27,15 @@ python -m pip install -r requirements.txt
 ```
 
 For development tools, use `requirements-dev.txt` instead. Copy `.env.example` to `.env` and
-set the LiteLLM model identifiers and corresponding provider credentials.
+set `LITELLM_API_KEY`, `LITELLM_API_BASE`, and the exact hosted model identifier. For Doubleword,
+use `https://api.doubleword.ai/v1` as the base and prefix the model name with `openai/`, as
+required by LiteLLM's OpenAI-compatible routing.
+
+Make one real provider request from the repository root:
+
+```bash
+PYTHONPATH=src python scripts/manual_chat_test.py "Explain retrieval augmented generation in one sentence."
+```
 
 Start only the local vector database:
 
@@ -66,4 +74,3 @@ in unit tests; real credentials belong only in opt-in integration tests.
 
 Document parsers, MCP integrations, authentication, observability services, and full application
 containerization are intentionally deferred until their milestones begin.
-

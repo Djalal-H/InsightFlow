@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     log_level: str = "INFO"
+    litellm_api_key: str | None = None
+    litellm_api_base: str | None = None
     litellm_chat_model: str = ""
     litellm_embedding_model: str = ""
     qdrant_url: str = "http://localhost:6333"
@@ -27,4 +29,3 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return one settings instance per process."""
     return Settings()
-
