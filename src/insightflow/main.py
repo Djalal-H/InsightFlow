@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 
 from insightflow.api.routes.health import router as health_router
+from insightflow.api.routes.query import router as query_router
 
 
 def create_app() -> FastAPI:
@@ -13,8 +14,8 @@ def create_app() -> FastAPI:
         description="API-first agent orchestration and retrieval platform.",
     )
     application.include_router(health_router)
+    application.include_router(query_router)
     return application
 
 
 app = create_app()
-
