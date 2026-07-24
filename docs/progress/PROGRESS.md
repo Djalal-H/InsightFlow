@@ -2,8 +2,8 @@
 
 ## Current status
 
-- Current stage: Stage 1
-- Last updated: 2026-07-17
+- Current stage: Stage 2
+- Last updated: 2026-07-24
 - Overall state: in progress
 
 ## Stage summary
@@ -11,7 +11,7 @@
 | Stage | Status | Evidence |
 |---|---|---|
 | Stage 1 | in progress | Repository foundation is present, but tests, runtime dependency pins, and mypy validation remain incomplete |
-| Stage 2 | not started | — |
+| Stage 2 | complete | Query workflow, provider validation and error mapping, and mocked contract coverage verified |
 | Stage 3 | not started | — |
 | Stage 4 | not started | — |
 | Stage 5 | not started | — |
@@ -44,3 +44,26 @@
   - Add Stage 1 unit/integration coverage, including health and adapter boundaries.
   - Resolve the LangGraph typing errors so mypy passes.
 - Commit: `2987fe0`
+
+### 2026-07-24 — Stage 2 minimal hosted-model workflow verification
+
+- Stage: Stage 2
+- Status: completed
+- Scope: Verified the committed non-streaming query workflow, provider-independent composition, stable provider error mapping, and mocked API/provider coverage.
+- Changed:
+  - `src/insightflow/api/routes/query.py`, `src/insightflow/api/schemas.py` — exposes the typed `POST /query` request/response contract and documented provider-failure responses.
+  - `src/insightflow/agents/graph.py`, `src/insightflow/agents/nodes/answer.py` — executes the minimal LangGraph answer node through the chat-provider protocol.
+  - `src/insightflow/api/dependencies.py`, `src/insightflow/providers/llm.py` — composes LiteLLM behind the provider contract and validates/mapping provider failures.
+  - `src/insightflow/api/errors.py`, `src/insightflow/main.py` — returns stable, sanitized HTTP provider-error envelopes.
+  - `tests/integration/test_query_api.py`, `tests/unit/test_llm_provider.py`, `tests/unit/test_provider_dependencies.py` — covers mocked query behavior, error responses, adapter translation, and dependency composition.
+- Validation:
+  - `./.venv/bin/python -m pytest -q` — passed: 22 tests passed
+  - `./.venv/bin/ruff check src tests` — passed
+  - `./.venv/bin/mypy src` — passed: no issues in 26 source files
+  - `git diff --check 2987fe0..HEAD` — passed
+  - `git status --short` — passed: clean worktree before this ledger update
+- Decisions:
+  - LiteLLM remains behind the `ChatProvider` contract; expected provider failures map to fixed, non-sensitive HTTP responses.
+- Remaining:
+  - Stage 3 ingestion and RAG work has not started. Stage 1 still needs direct runtime dependency pins before it can be marked complete.
+- Commit: `3eb1bce`
