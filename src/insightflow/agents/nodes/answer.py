@@ -13,7 +13,6 @@ def make_answer_node(chat_provider: ChatProvider) -> AgentNode:
         messages = [{"role": "user", "content": query}]
         answer = await chat_provider.complete(messages)
         return {
-            **state,
             "answer": answer,
             "sources": state.get("sources", []),
         }

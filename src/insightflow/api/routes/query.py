@@ -5,22 +5,24 @@ from fastapi import APIRouter
 from insightflow.agents.graph import build_graph
 from insightflow.agents.nodes.answer import make_answer_node
 from insightflow.agents.state import AgentState
-from insightflow.api.schemas import QueryRequest, QueryResponse
-from insightflow.core.config import get_settings
-from insightflow.providers.llm import LiteLLMChatProvider
+from insightflow.api.dependencies import ChatProviderDependency
+from insightflow.api.schemas import ErrorResponse, QueryRequest, QueryResponse
 
 router = APIRouter(tags=["query"])
 
 
-@router.post("/query", response_model=QueryResponse)
-async def query(request: QueryRequest) -> QueryResponse:
+@router.post(
+    "/query",
+    response_model=QueryResponse,
+    responses={
+        429: {"model": ErrorResponse, "description": "The provider is rate limited."},
+        502: {"model": ErrorResponse, "description": "The provider request failed."},
+        503: {"model": ErrorResponse, "description": "The provider is not configured."},
+        504: {"model": ErrorResponse, "description": "The provider request timed out."},
+    },
+)
+async def query(request: QueryRequest, chat_provider: ChatProviderDependency) -> QueryResponse:
     """Answer a user query through the LangGraph agent workflow."""
-    settings = get_settings()
-    chat_provider = LiteLLMChatProvider(
-        model=settings.litellm_chat_model,
-        api_key=settings.litellm_api_key,
-        api_base=settings.litellm_api_base,
-    )
     graph = build_graph(make_answer_node(chat_provider))
 
     initial_state: AgentState = {"query": request.query}

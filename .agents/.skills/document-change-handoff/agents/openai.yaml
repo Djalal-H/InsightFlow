@@ -1,0 +1,4 @@
+interface:
+  display_name: "Document Change Handoff"
+  short_description: "Document implementation changes for developer handoff"
+  default_prompt: "Use $document-change-handoff to create a concise developer handoff for the changes just implemented."

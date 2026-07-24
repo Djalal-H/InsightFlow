@@ -23,3 +23,21 @@ class QueryResponse(BaseModel):
 
     answer: str
     sources: list[str] = Field(default_factory=list)
+
+
+class ErrorDetail(BaseModel):
+    """Stable, sanitized description of an expected application failure."""
+
+    code: Literal[
+        "provider_configuration_error",
+        "provider_timeout",
+        "provider_rate_limited",
+        "provider_error",
+    ]
+    message: str
+
+
+class ErrorResponse(BaseModel):
+    """Shared HTTP error envelope."""
+
+    error: ErrorDetail

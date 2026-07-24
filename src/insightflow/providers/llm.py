@@ -3,9 +3,28 @@
 from collections.abc import AsyncIterator, Sequence
 from typing import Any, Protocol
 
-from litellm import acompletion
+from litellm import acompletion, get_llm_provider
+from litellm.exceptions import (
+    APIConnectionError,
+    APIError,
+    APIResponseValidationError,
+    AuthenticationError,
+    BadRequestError,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    ServiceUnavailableError,
+    Timeout,
+    UnprocessableEntityError,
+)
 
-from insightflow.core.exceptions import ProviderError
+from insightflow.core.exceptions import (
+    ProviderConfigurationError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+)
 
 ChatMessage = dict[str, Any]
 
@@ -22,9 +41,23 @@ class LiteLLMChatProvider:
     """Call any LiteLLM-supported hosted chat provider."""
 
     def __init__(self, model: str, api_key: str | None = None, api_base: str | None = None) -> None:
-        if not model:
-            raise ValueError("A LiteLLM chat model identifier is required")
-        self._model = model
+        normalized_model = model.strip()
+        if not normalized_model:
+            raise ProviderConfigurationError
+
+        try:
+            resolved_model, provider, _, _ = get_llm_provider(
+                model=normalized_model,
+                api_key=api_key,
+                api_base=api_base,
+            )
+        except BadRequestError as exc:
+            raise ProviderConfigurationError from exc
+
+        if not resolved_model.strip() or not provider:
+            raise ProviderConfigurationError
+
+        self._model = normalized_model
         self._api_key = api_key
         self._api_base = api_base
 
@@ -38,14 +71,39 @@ class LiteLLMChatProvider:
         return options
 
     async def complete(self, messages: Sequence[ChatMessage]) -> str:
-        response = await acompletion(
-            model=self._model,
-            messages=list(messages),
-            **self._request_options(),
-        )
-        content = response.choices[0].message.content
+        try:
+            response = await acompletion(
+                model=self._model,
+                messages=list(messages),
+                **self._request_options(),
+            )
+        except Timeout as exc:
+            raise ProviderTimeoutError from exc
+        except RateLimitError as exc:
+            raise ProviderRateLimitError from exc
+        except (
+            AuthenticationError,
+            BadRequestError,
+            NotFoundError,
+            PermissionDeniedError,
+        ) as exc:
+            raise ProviderConfigurationError from exc
+        except (
+            APIConnectionError,
+            APIError,
+            APIResponseValidationError,
+            InternalServerError,
+            ServiceUnavailableError,
+            UnprocessableEntityError,
+        ) as exc:
+            raise ProviderError from exc
+
+        try:
+            content = response.choices[0].message.content
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            raise ProviderError from exc
         if not isinstance(content, str):
-            raise ProviderError("The chat provider returned no text content")
+            raise ProviderError
         return content
 
     async def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[str]:
