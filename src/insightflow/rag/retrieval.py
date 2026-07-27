@@ -1,21 +1,18 @@
-"""Retrieval domain types and contracts."""
+"""Public retrieval-domain imports kept at the existing module boundary."""
 
-from dataclasses import dataclass, field
-from typing import Any, Protocol
+from insightflow.rag.models import (
+    AssembledContext,
+    ContextBudget,
+    RetrievalQuery,
+    RetrievedChunk,
+)
+from insightflow.rag.protocols import ContextAssembler, Retriever
 
-
-@dataclass(frozen=True, slots=True)
-class RetrievalResult:
-    """A retrieved passage and its relevance metadata."""
-
-    text: str
-    source: str
-    score: float
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-class Retriever(Protocol):
-    """Contract consumed by agent retrieval nodes."""
-
-    async def retrieve(self, query: str, limit: int = 5) -> list[RetrievalResult]: ...
-
+__all__ = [
+    "AssembledContext",
+    "ContextAssembler",
+    "ContextBudget",
+    "RetrievalQuery",
+    "RetrievedChunk",
+    "Retriever",
+]

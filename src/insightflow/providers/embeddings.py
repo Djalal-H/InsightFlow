@@ -11,7 +11,9 @@ from insightflow.core.exceptions import ProviderError
 class EmbeddingProvider(Protocol):
     """Contract used by ingestion and retrieval to create hosted embeddings."""
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
+    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]: ...
+
+    async def embed_query(self, text: str) -> list[float]: ...
 
 
 class LiteLLMEmbeddingProvider:
@@ -22,10 +24,15 @@ class LiteLLMEmbeddingProvider:
             raise ValueError("A LiteLLM embedding model identifier is required")
         self._model = model
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        """Embed document inputs while preserving their input order."""
         response = await aembedding(model=self._model, input=list(texts))
         vectors = [item["embedding"] for item in response.data]
         if len(vectors) != len(texts):
             raise ProviderError("The embedding provider returned an unexpected vector count")
         return vectors
 
+    async def embed_query(self, text: str) -> list[float]:
+        """Embed one query through a query-specific domain method."""
+        vectors = await self.embed_documents([text])
+        return vectors[0]
