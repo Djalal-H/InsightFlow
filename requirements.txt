@@ -5,3 +5,4 @@ litellm
 qdrant-client
 pydantic
 pydantic-settings
+markdown
