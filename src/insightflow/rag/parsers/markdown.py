@@ -4,6 +4,7 @@ import re
 
 import markdown as markdown_lib
 
+from insightflow.core.exceptions import DocumentRejectedError
 from insightflow.rag.identity import (
     content_checksum,
     create_document_id,
@@ -12,6 +13,7 @@ from insightflow.rag.identity import (
 )
 from insightflow.rag.models import DocumentElement, DocumentSource, NormalizedDocument
 
+_SUPPORTED_MIME_TYPES = {"text/markdown"}
 _TAG_RE = re.compile(r"<[^>]+>")
 _TITLE_RE = re.compile(r"^#\s+(.+?)(?:\s*\{[^}]*\})?\s*$", re.MULTILINE)
 _BLANK_RUN_RE = re.compile(r"\n{3,}")
@@ -38,12 +40,21 @@ class MarkdownParser:
     parser_version = "1.0.0"
 
     async def parse(self, source: DocumentSource) -> NormalizedDocument:
+        if source.mime_type not in _SUPPORTED_MIME_TYPES:
+            raise DocumentRejectedError(
+                reason="unsupported_format",
+                source_identifier=source.source_identifier,
+            )
+
         raw = source.path.read_text(encoding="utf-8", errors="replace")
         title = _extract_title(raw)
         text = _flatten(raw)
 
         if not text:
-            raise ValueError(f"{source.source_identifier}: no extractable text after flattening")
+            raise DocumentRejectedError(
+                reason="empty_document",
+                source_identifier=source.source_identifier,
+            )
 
         document_id = create_document_id(source.source_identifier)
         document_version = create_document_version(text)
@@ -69,4 +80,3 @@ class MarkdownParser:
             parser_version=self.parser_version,
             content_checksum=content_checksum(text),
         )
-

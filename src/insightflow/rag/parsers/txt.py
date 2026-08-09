@@ -2,6 +2,7 @@
 
 import re
 
+from insightflow.core.exceptions import DocumentRejectedError
 from insightflow.rag.identity import (
     content_checksum,
     create_document_id,
@@ -9,6 +10,8 @@ from insightflow.rag.identity import (
     create_element_id,
 )
 from insightflow.rag.models import DocumentElement, DocumentSource, NormalizedDocument
+
+_SUPPORTED_MIME_TYPES = {"text/plain"}
 
 
 def _normalize_whitespace(raw: str) -> str:
@@ -26,11 +29,20 @@ class TxtParser:
     parser_version = "1.0.0"
 
     async def parse(self, source: DocumentSource) -> NormalizedDocument:
+        if source.mime_type not in _SUPPORTED_MIME_TYPES:
+            raise DocumentRejectedError(
+                reason="unsupported_format",
+                source_identifier=source.source_identifier,
+            )
+
         raw = source.path.read_text(encoding="utf-8", errors="replace")
         text = _normalize_whitespace(raw)
 
         if not text:
-            raise ValueError(f"{source.source_identifier}: file is empty after normalization")
+            raise DocumentRejectedError(
+                reason="empty_document",
+                source_identifier=source.source_identifier,
+            )
 
         document_id = create_document_id(source.source_identifier)
         document_version = create_document_version(text)
