@@ -18,6 +18,7 @@ from insightflow.rag.models import (
     RetrievalQuery,
     RetrievedChunk,
 )
+from insightflow.rag.parsers import DoclingPdfParser
 from insightflow.rag.protocols import (
     ChunkContextualizer,
     Chunker,
@@ -36,6 +37,7 @@ __all__ = [
     "ContextBudget",
     "DocumentElement",
     "DocumentParser",
+    "DoclingPdfParser",
     "DocumentSource",
     "EmbeddingConfig",
     "IngestionConfig",
