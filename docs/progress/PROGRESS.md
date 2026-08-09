@@ -2,22 +2,22 @@
 
 ## Current status
 
-- Current stage: Stage 2
-- Last updated: 2026-07-24
+- Current stage: Stage 3
+- Last updated: 2026-08-03
 - Overall state: in progress
 
 ## Stage summary
 
-| Stage | Status | Evidence |
-|---|---|---|
+| Stage   | Status      | Evidence                                                                                                    |
+| ------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
 | Stage 1 | in progress | Repository foundation is present, but tests, runtime dependency pins, and mypy validation remain incomplete |
-| Stage 2 | complete | Query workflow, provider validation and error mapping, and mocked contract coverage verified |
-| Stage 3 | not started | — |
-| Stage 4 | not started | — |
-| Stage 5 | not started | — |
-| Stage 6 | not started | — |
-| Stage 7 | not started | — |
-| Stage 8 | not started | — |
+| Stage 2 | complete    | Query workflow, provider validation and error mapping, and mocked contract coverage verified                |
+| Stage 3 | in progress | Provider-neutral RAG contracts and structural digital-PDF normalization are implemented and tested          |
+| Stage 4 | not started | —                                                                                                          |
+| Stage 5 | not started | —                                                                                                          |
+| Stage 6 | not started | —                                                                                                          |
+| Stage 7 | not started | —                                                                                                          |
+| Stage 8 | not started | —                                                                                                          |
 
 ## Work log
 
@@ -67,3 +67,25 @@
 - Remaining:
   - Stage 3 ingestion and RAG work has not started. Stage 1 still needs direct runtime dependency pins before it can be marked complete.
 - Commit: `3eb1bce`
+
+### 2026-08-03 — Structural digital-PDF normalization
+
+- Stage: Stage 3
+- Status: completed
+- Scope: Implemented and verified a provider-neutral Docling adapter that converts supported digital PDFs into deterministic structured document elements with hierarchy, page provenance, character offsets, tables, and stable rejection reasons.
+- Changed:
+
+  - `requirements.txt` — adds pinned Docling and pypdf runtime dependencies.
+  - `src/insightflow/core/exceptions.py` — defines stable document-rejection reasons and the ingestion rejection exception.
+  - `src/insightflow/rag/parsers/docling_pdf.py`, `src/insightflow/rag/parsers/__init__.py` — implements and exports PDF inspection, OCR-disabled Docling conversion, structural mapping, deterministic identities, offsets, and normalized output assembly.
+  - `src/insightflow/rag/__init__.py` — exposes the PDF parser through the RAG package boundary.
+  - `tests/unit/test_docling_pdf_parser.py` — verifies structural mapping, hierarchy, tables, provenance, deterministic output, conversion policy, encryption detection, and rejection behavior with mocked conversion except for converter configuration and pypdf inspection.
+- Decisions:
+
+  - The parser supports digital PDFs only: OCR is disabled, table-structure extraction is enabled, and scanned or textless PDFs receive explicit rejection reasons.
+  - Docling-specific objects remain behind an adapter and do not cross the provider-neutral RAG domain boundary.
+- Remaining:
+
+  - Complete the remaining Stage 3 ingestion path: traceable chunking, hosted embedding execution, Qdrant collection and payload persistence, dense retrieval, grounded generation, structured answers, and persistence verification.
+  - Real end-to-end PDF conversion was not validated; conversion behavior is covered primarily with fakes, while real checks cover converter configuration and pypdf inspection.
+- Commit: `uncommitted`

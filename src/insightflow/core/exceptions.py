@@ -1,5 +1,7 @@
 """Application-specific exception types."""
 
+from typing import Literal
+
 
 class InsightFlowError(Exception):
     """Base exception for expected application failures."""
@@ -23,3 +25,26 @@ class ProviderRateLimitError(ProviderError):
 
 class StorageError(InsightFlowError):
     """A vector-store operation failed."""
+
+
+DocumentRejectionReason = Literal[
+    "unsupported_format",
+    "encrypted_pdf",
+    "scanned_pdf",
+    "textless_pdf",
+    "conversion_failed",
+]
+
+
+class DocumentRejectedError(InsightFlowError):
+    """A source document cannot enter the supported ingestion pipeline."""
+
+    def __init__(
+        self,
+        *,
+        reason: DocumentRejectionReason,
+        source_identifier: str,
+    ) -> None:
+        self.reason = reason
+        self.source_identifier = source_identifier
+        super().__init__(f"Document rejected ({reason}): {source_identifier}")
