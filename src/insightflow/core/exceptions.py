@@ -32,9 +32,9 @@ DocumentRejectionReason = Literal[
     "encrypted_pdf",
     "scanned_pdf",
     "textless_pdf",
+    "empty_document",
     "conversion_failed",
 ]
-
 
 class DocumentRejectedError(InsightFlowError):
     """A source document cannot enter the supported ingestion pipeline."""
