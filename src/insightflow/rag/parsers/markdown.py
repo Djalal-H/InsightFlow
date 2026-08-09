@@ -13,7 +13,7 @@ from insightflow.rag.identity import (
 from insightflow.rag.models import DocumentElement, DocumentSource, NormalizedDocument
 
 _TAG_RE = re.compile(r"<[^>]+>")
-_TITLE_RE = re.compile(r"^#\s+(.+)$", re.MULTILINE)
+_TITLE_RE = re.compile(r"^#\s+(.+?)(?:\s*\{[^}]*\})?\s*$", re.MULTILINE)
 _BLANK_RUN_RE = re.compile(r"\n{3,}")
 
 
