@@ -8,3 +8,4 @@ pydantic-settings
 markdown
 docling==2.117.0
 pypdf==6.14.2
+tiktoken source /home/lina/InsightFlow/.venv/bin/activate
