@@ -74,3 +74,33 @@ in unit tests; real credentials belong only in opt-in integration tests.
 
 Document parsers, MCP integrations, authentication, observability services, and full application
 containerization are intentionally deferred until their milestones begin.
+
+## Max-Min semantic chunking
+
+The reusable `MaxMinSemanticChunker` groups consecutive English sentence units using hosted
+embeddings and the published Max-Min similarity rule. It preserves normalized element, heading,
+and page provenance while treating `RAG_CHUNK_MAX_TOKENS` as a hard limit and
+`RAG_CHUNK_MIN_TOKENS` as a best-effort merge target. Tables, code, headings, titles, and captions
+remain atomic unless they exceed the hard token limit.
+
+Select the strategy and optionally tune its published defaults through the environment:
+
+```dotenv
+RAG_CHUNKING_STRATEGY=semantic_max_min
+RAG_CHUNK_OVERLAP_TOKENS=0
+RAG_MAX_MIN_HARD_THRESHOLD=0.6
+RAG_MAX_MIN_SIMILARITY_COEFFICIENT=0.9
+RAG_MAX_MIN_INITIALIZATION_CONSTANT=1.5
+```
+
+Chunking is asynchronous because it embeds sentence units through `EmbeddingProvider`. The
+component is available from `insightflow.rag`; parser-to-Qdrant ingestion orchestration remains
+separate Stage 3 work.
+
+For manual inspection with real sentence embeddings, open
+`notebooks/inspect_max_min_chunking.ipynb`, select the repository `.venv` kernel, set
+`DOCUMENT_PATH`, and run the cells in order. The notebook reads model credentials from `.env`,
+prints complete chunk provenance and previews, and performs no Qdrant writes. Its embedding cell
+makes billable provider requests; the optional JSON export remains disabled until `OUTPUT_PATH` is
+set explicitly. Clear executed notebook outputs before committing to avoid retaining document
+content in Git.

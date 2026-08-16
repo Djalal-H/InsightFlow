@@ -1,5 +1,6 @@
 """Public ingestion-domain imports kept at the existing module boundary."""
 
+from insightflow.rag.chunkers import MaxMinSemanticChunker
 from insightflow.rag.models import (
     Chunk,
     DocumentElement,
@@ -19,5 +20,6 @@ __all__ = [
     "DocumentSource",
     "IngestionResult",
     "IngestionWarning",
+    "MaxMinSemanticChunker",
     "NormalizedDocument",
 ]

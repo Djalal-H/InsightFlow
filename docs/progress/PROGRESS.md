@@ -3,7 +3,7 @@
 ## Current status
 
 - Current stage: Stage 3
-- Last updated: 2026-08-03
+- Last updated: 2026-08-14
 - Overall state: in progress
 
 ## Stage summary
@@ -12,7 +12,7 @@
 | ------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
 | Stage 1 | in progress | Repository foundation is present, but tests, runtime dependency pins, and mypy validation remain incomplete |
 | Stage 2 | complete    | Query workflow, provider validation and error mapping, and mocked contract coverage verified                |
-| Stage 3 | in progress | Provider-neutral RAG contracts and structural digital-PDF normalization are implemented and tested          |
+| Stage 3 | in progress | PDF normalization and bounded Max-Min semantic chunking are implemented and tested                           |
 | Stage 4 | not started | —                                                                                                          |
 | Stage 5 | not started | —                                                                                                          |
 | Stage 6 | not started | —                                                                                                          |
@@ -88,4 +88,28 @@
 
   - Complete the remaining Stage 3 ingestion path: traceable chunking, hosted embedding execution, Qdrant collection and payload persistence, dense retrieval, grounded generation, structured answers, and persistence verification.
   - Real end-to-end PDF conversion was not validated; conversion behavior is covered primarily with fakes, while real checks cover converter configuration and pypdf inspection.
+- Commit: `uncommitted`
+
+### 2026-08-14 — Bounded Max-Min semantic chunking
+
+- Stage: Stage 3
+- Status: completed
+- Scope: Implemented the reusable semantic chunker component; ingestion orchestration and vector persistence remain deferred.
+- Changed:
+  - `src/insightflow/rag/chunkers/` — adds English-first sentence segmentation, hosted embedding batches, the published Max-Min clustering rule, bounded split/merge behavior, and deterministic traceable chunks.
+  - RAG and application configuration — exposes the strategy and validated algorithm defaults while rejecting unsupported overlap.
+  - Embedding and chunker protocols — adds model-aware token counting and makes chunking asynchronous.
+  - `notebooks/inspect_max_min_chunking.ipynb` — parses supported documents, makes real hosted sentence-embedding calls, and renders chunks without writing to Qdrant.
+  - Unit tests and setup documentation — cover thresholds, batching, connection options, token bounds, structured elements, traceability, deterministic output, and malformed vectors without provider calls.
+- Validation:
+  - `./.venv/bin/python -m pytest -q` — passed: 78 tests passed
+  - `./.venv/bin/ruff check src tests` — passed
+  - `./.venv/bin/mypy src` — passed: no issues in 37 source files
+  - `git diff --check` — passed before this ledger update
+- Decisions:
+  - The maximum token limit is strict; the minimum is best effort when no legal adjacent merge fits.
+  - Version one uses deterministic English-first sentence rules and the configured hosted embedding model.
+- Remaining:
+  - Add parser-to-chunker ingestion orchestration, chunk-level embedding and Qdrant persistence, dense retrieval, grounded generation, structured answers, and persistence verification.
+  - Validate chunk quality and tune Max-Min thresholds on a representative corpus with real hosted embeddings.
 - Commit: `uncommitted`

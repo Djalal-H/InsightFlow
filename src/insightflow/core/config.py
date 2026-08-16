@@ -32,13 +32,18 @@ class Settings(BaseSettings):
     qdrant_vector_name: str = "dense"
     qdrant_distance: Literal["cosine", "dot", "euclid", "manhattan"] = "cosine"
     rag_corpus_dir: Path | None = None
-    rag_chunking_strategy: Literal["fixed_window", "structure_recursive"] = (
+    rag_chunking_strategy: Literal[
+        "fixed_window", "structure_recursive", "semantic_max_min"
+    ] = (
         "structure_recursive"
     )
     rag_chunk_target_tokens: int = Field(default=450, ge=1)
     rag_chunk_max_tokens: int = Field(default=600, ge=1)
     rag_chunk_min_tokens: int = Field(default=80, ge=1)
     rag_chunk_overlap_tokens: int = Field(default=0, ge=0)
+    rag_max_min_hard_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    rag_max_min_similarity_coefficient: float = Field(default=0.9, gt=0.0, le=2.0)
+    rag_max_min_initialization_constant: float = Field(default=1.5, gt=0.0, le=2.0)
     rag_embedding_batch_size: int = Field(default=32, ge=1)
     rag_upload_batch_size: int = Field(default=64, ge=1)
     rag_candidate_top_k: int = Field(default=12, ge=1, le=100)
@@ -58,6 +63,11 @@ class Settings(BaseSettings):
             )
         if self.rag_chunk_overlap_tokens >= self.rag_chunk_max_tokens:
             raise ValueError("RAG chunk overlap must be smaller than the maximum")
+        if (
+            self.rag_chunking_strategy == "semantic_max_min"
+            and self.rag_chunk_overlap_tokens != 0
+        ):
+            raise ValueError("semantic_max_min does not support token overlap")
         return self
 
 

@@ -1,5 +1,6 @@
 """Retrieval-augmented generation domain."""
 
+from insightflow.rag.chunkers import MaxMinSemanticChunker
 from insightflow.rag.config import (
     ChunkingConfig,
     EmbeddingConfig,
@@ -43,6 +44,7 @@ __all__ = [
     "IngestionConfig",
     "IngestionResult",
     "IngestionWarning",
+    "MaxMinSemanticChunker",
     "NormalizedDocument",
     "RetrievalConfig",
     "RetrievalQuery",

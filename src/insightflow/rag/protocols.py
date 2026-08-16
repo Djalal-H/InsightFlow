@@ -31,7 +31,11 @@ class Chunker(Protocol):
     strategy_name: str
     strategy_version: str
 
-    def chunk(self, document: NormalizedDocument, config: ChunkingConfig) -> list[Chunk]: ...
+    async def chunk(
+        self,
+        document: NormalizedDocument,
+        config: ChunkingConfig,
+    ) -> list[Chunk]: ...
 
 
 @runtime_checkable
@@ -65,4 +69,3 @@ class ContextAssembler(Protocol):
         candidates: list[RetrievedChunk],
         budget: ContextBudget,
     ) -> AssembledContext: ...
-

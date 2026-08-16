@@ -1,6 +1,6 @@
 ---
 name: document-change-handoff
-description: Create or update concise developer-facing Markdown documentation for completed implementation work. Use after a feature, fix, refactor, reliability task, or other code change when another developer needs a quick handoff containing the task goal, a verified completion checklist, the main changed files with each file's purpose, relevant public behavior or contracts, and important deferred scope.
+description: Create or update concise developer-facing Markdown documentation for completed implementation work. Use after a feature, fix, refactor, reliability task, or other code change when another developer needs a quick handoff containing the task goal, a plain-language explanation of the main approach with an example, a neutral implementation overview, a verified completion checklist, the main changed files with each file's purpose, relevant public behavior or contracts, and important deferred scope.
 ---
 
 # Document Change Handoff
@@ -40,6 +40,17 @@ without reading the full diff.
 
 <One short paragraph explaining the intended outcome and why it matters.>
 
+## Main approach
+
+<Explain the central idea in plain language, including why it solves the task.>
+
+<Give one small, concrete example such as input and output, before and after, or a short scenario.>
+
+## Implementation overview
+
+<Describe the main components, responsibilities, and data flow in neutral, easy-to-understand
+terms. Keep implementation names only where they help the next developer locate the behavior.>
+
 ## Completed checklist
 
 - [x] <Verified behavior or implementation outcome>
@@ -63,6 +74,14 @@ Add these sections only when relevant:
 
 - Optimize for a developer handoff, not a full design document.
 - Keep the goal to one paragraph and checklist items outcome-focused.
+- Always explain the main approach in plain language and include one concrete example. Choose the
+  smallest example that makes the behavior clear; do not assume specialist domain knowledge.
+- Always include an implementation overview. Describe responsibilities and data flow in neutral,
+  easy-to-understand terms without promotional language, unnecessary jargon, or low-level control
+  flow. Define any unavoidable technical term on first use.
+- Keep the main-approach explanation focused on what the solution does and why. Keep the
+  implementation overview focused on how the repository realizes it; do not duplicate the same
+  paragraph under both headings.
 - List only the main files, normally 4–10; do not reproduce the entire diff.
 - Explain each file's responsibility and the purpose of its change.
 - Use checked items only for completed, verified work; use unchecked items for genuine remaining
