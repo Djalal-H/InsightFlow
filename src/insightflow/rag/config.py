@@ -4,7 +4,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ChunkingStrategy = Literal["fixed_window", "structure_recursive"]
+ChunkingStrategy = Literal["fixed_window", "structure_recursive", "semantic_max_min"]
 DistanceMetric = Literal["cosine", "dot", "euclid", "manhattan"]
 
 
@@ -22,6 +22,9 @@ class ChunkingConfig(RAGConfigModel):
     max_tokens: int = Field(default=600, ge=1)
     min_tokens: int = Field(default=80, ge=1)
     overlap_tokens: int = Field(default=0, ge=0)
+    hard_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    similarity_coefficient: float = Field(default=0.9, gt=0.0, le=2.0)
+    initialization_constant: float = Field(default=1.5, gt=0.0, le=2.0)
 
     @model_validator(mode="after")
     def validate_token_limits(self) -> Self:
@@ -30,6 +33,8 @@ class ChunkingConfig(RAGConfigModel):
             raise ValueError("token limits must satisfy min_tokens <= target_tokens <= max_tokens")
         if self.overlap_tokens >= self.max_tokens:
             raise ValueError("overlap_tokens must be smaller than max_tokens")
+        if self.strategy == "semantic_max_min" and self.overlap_tokens != 0:
+            raise ValueError("semantic_max_min does not support token overlap")
         return self
 
 
@@ -71,4 +76,3 @@ class EmbeddingConfig(RAGConfigModel):
             f"{self.provider}:{self.model}:{self.dimensions}:"
             f"{self.distance}:{self.normalization}"
         )
-

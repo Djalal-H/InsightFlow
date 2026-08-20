@@ -243,6 +243,9 @@ def test_chunking_and_embedding_configs_expose_locked_defaults() -> None:
         "max_tokens": 600,
         "min_tokens": 80,
         "overlap_tokens": 0,
+        "hard_threshold": 0.6,
+        "similarity_coefficient": 0.9,
+        "initialization_constant": 1.5,
     }
     assert control.overlap_tokens == 64
     assert embedding.fingerprint == (
@@ -258,6 +261,19 @@ def test_settings_reject_incoherent_rag_token_limits() -> None:
             rag_chunk_min_tokens=500,
             rag_chunk_target_tokens=400,
             rag_chunk_max_tokens=600,
+        )
+
+
+def test_semantic_chunking_rejects_overlap() -> None:
+    """Max-Min boundaries cannot be combined with fixed-window overlap."""
+    with pytest.raises(ValidationError, match="does not support token overlap"):
+        ChunkingConfig(strategy="semantic_max_min", overlap_tokens=1)
+
+    with pytest.raises(ValidationError, match="does not support token overlap"):
+        Settings(
+            _env_file=None,
+            rag_chunking_strategy="semantic_max_min",
+            rag_chunk_overlap_tokens=1,
         )
 
 
@@ -288,7 +304,7 @@ def test_runtime_protocols_accept_provider_neutral_implementations() -> None:
         strategy_name = "fake"
         strategy_version = "1"
 
-        def chunk(
+        async def chunk(
             self,
             document: NormalizedDocument,
             config: ChunkingConfig,
@@ -304,4 +320,3 @@ def test_runtime_protocols_accept_provider_neutral_implementations() -> None:
     assert isinstance(FakeParser(), DocumentParser)
     assert isinstance(FakeChunker(), Chunker)
     assert isinstance(FakeRetriever(), Retriever)
-
