@@ -13,19 +13,23 @@ from insightflow.core.exceptions import (
 
 CONFIGURATION_ERROR: Final = {
     "code": "provider_configuration_error",
-    "message": "The chat provider is not configured correctly.",
+    "message": "The model provider is not configured correctly.",
 }
 TIMEOUT_ERROR: Final = {
     "code": "provider_timeout",
-    "message": "The chat provider timed out.",
+    "message": "The model provider timed out.",
 }
 RATE_LIMIT_ERROR: Final = {
     "code": "provider_rate_limited",
-    "message": "The chat provider is temporarily rate limited.",
+    "message": "The model provider is temporarily rate limited.",
 }
 UPSTREAM_ERROR: Final = {
     "code": "provider_error",
-    "message": "The chat provider request failed.",
+    "message": "The model provider request failed.",
+}
+STORAGE_ERROR: Final = {
+    "code": "storage_unavailable",
+    "message": "The document store is unavailable.",
 }
 
 
@@ -47,3 +51,12 @@ async def provider_error_handler(request: Request, exc: Exception) -> JSONRespon
         detail = UPSTREAM_ERROR
 
     return JSONResponse(status_code=status_code, content={"error": detail})
+
+
+async def storage_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Return a fixed public response without exposing vector-store details."""
+    del request, exc
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"error": STORAGE_ERROR},
+    )

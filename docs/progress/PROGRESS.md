@@ -2,8 +2,8 @@
 
 ## Current status
 
-- Current stage: Stage 3
-- Last updated: 2026-08-14
+- Current stage: Stage 3 (implementation complete; hosted-model run pending)
+- Last updated: 2026-10-26
 - Overall state: in progress
 
 ## Stage summary
@@ -12,7 +12,7 @@
 | ------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
 | Stage 1 | in progress | Repository foundation is present, but tests, runtime dependency pins, and mypy validation remain incomplete |
 | Stage 2 | complete    | Query workflow, provider validation and error mapping, and mocked contract coverage verified                |
-| Stage 3 | in progress | PDF normalization and bounded Max-Min semantic chunking are implemented and tested                           |
+| Stage 3 | complete (mocked models) | Ingestion, Qdrant persistence, dense retrieval, and grounded answers with sources verified; restart persistence verified on a real Qdrant server with fake embeddings; no hosted-model run |
 | Stage 4 | not started | —                                                                                                          |
 | Stage 5 | not started | —                                                                                                          |
 | Stage 6 | not started | —                                                                                                          |
@@ -112,4 +112,88 @@
 - Remaining:
   - Add parser-to-chunker ingestion orchestration, chunk-level embedding and Qdrant persistence, dense retrieval, grounded generation, structured answers, and persistence verification.
   - Validate chunk quality and tune Max-Min thresholds on a representative corpus with real hosted embeddings.
+- Commit: `uncommitted`
+
+### 2026-10-26 — Parser-to-chunker ingestion orchestration
+
+- Stage: Stage 3
+- Status: partial
+- Scope: Connected corpus discovery, MIME-based parser selection, and the configured chunker into one deterministic pipeline. Embedding of chunks and Qdrant persistence remain deferred.
+- Changed:
+  - `src/insightflow/rag/ingestion.py` — adds `discover_sources`, `create_default_parsers`, `create_chunker`, `IngestionPipeline`, and `IngestedDocument`.
+  - `src/insightflow/rag/models.py` — `IngestionResult` now requires `source_identifier` so rejected sources stay traceable.
+  - `src/insightflow/rag/chunkers/structure_recursive.py` — `chunk` is now asynchronous to satisfy the `Chunker` protocol.
+  - `requirements.txt` — repairs the malformed `tiktoken` line.
+  - `tests/unit/test_ingestion_pipeline.py`, `tests/unit/test_structure_recursive_chunker.py`, `tests/unit/test_rag_contracts.py` — cover discovery, rejection mapping, determinism, chunk traceability checks, and strategy selection.
+- Validation:
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues in 38 source files
+  - `pytest -q -p no:cacheprovider` — passed: 95 tests passed
+- Decisions:
+  - Sources are processed sequentially in sorted corpus-relative order. Hidden files are skipped; unsupported files produce `rejected` results with code `unsupported_format`.
+  - Only `DocumentRejectedError` becomes a per-document result. Provider and unexpected errors stop the run.
+  - A document that yields no chunks is rejected as `empty_document`.
+- Remaining:
+  - Chunk embedding, Qdrant collection creation and persistence, `skipped` handling for unchanged versions, an ingestion CLI, retrieval, and grounded generation.
+  - `create_default_parsers` is not covered by tests, and no real-corpus run was made.
+- Commit: `uncommitted`
+
+### 2026-10-26 — Chunk embedding, Qdrant persistence, version skipping, and ingestion CLI
+
+- Stage: Stage 3
+- Status: partial
+- Scope: Extended `IngestionPipeline` to embed chunks and persist them in Qdrant, skip unchanged document versions, and run from a command-line entry point.
+- Changed:
+  - `src/insightflow/rag/ingestion.py` — the pipeline now checks for a stored version, chunks, embeds in `embedding_batch_size` batches, validates vector count and size, and calls `ChunkStore.replace_document`; adds `create_index_fingerprint`. `IngestedDocument` was removed; the pipeline returns `IngestionResult`s.
+  - `src/insightflow/rag/protocols.py` — adds the `ChunkStore` protocol.
+  - `src/insightflow/storage/qdrant.py` — creates or verifies the named-vector collection and keyword payload indexes, maps chunks to payloads and back, detects complete stored versions, and replaces a document's points in `upload_batch_size` batches. Qdrant failures map to `StorageError`.
+  - `src/insightflow/providers/embeddings.py` — maps LiteLLM embedding failures to the same sanitized provider errors as chat.
+  - `src/insightflow/ingest.py` — new CLI: `python -m insightflow.ingest [CORPUS_DIR] [--force]`.
+  - `README.md`, `.env.example`, `CLAUDE.md` — document ingestion usage and required embedding settings.
+  - `tests/unit/test_ingestion_pipeline.py`, `tests/unit/test_qdrant_store.py`, `tests/unit/test_ingest_cli.py`, `tests/unit/test_embedding_provider_contract.py` — cover storage, skipping, forced re-ingestion, version replacement, vector-size validation, payload round trips, collection compatibility, CLI output, and error mapping.
+- Validation:
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues in 39 source files
+  - `pytest -q -p no:cacheprovider` — passed: 114 tests passed
+- Decisions:
+  - Unit tests use Qdrant's in-memory local mode and fake embeddings; no server or credentials are needed. Payload indexes have no effect in local mode, so index creation is not verified against a server.
+  - `replace_document` deletes the document's other points before upserting. An interrupted write leaves an incomplete version, which the completeness check (stored count equals `document_chunk_count`) reports as missing, so the next run rewrites it.
+  - The skip fingerprint covers parser name/version, chunker name/version, all chunking settings, and the embedding fingerprint.
+  - An existing collection with a different vector size or distance is refused; there is no automatic migration.
+- Remaining:
+  - No real run against a Qdrant server or hosted embedding model was performed; "searchable after restart" is unverified.
+  - `IngestionConfig.max_retries` is not applied; provider and storage calls are not retried.
+  - Documents removed from the corpus are not deleted from Qdrant.
+  - Chunk token counts are not checked against `EMBEDDING_MAX_INPUT_TOKENS`.
+  - Dense retrieval, grounded generation, and structured answers with sources.
+- Commit: `uncommitted`
+
+### 2026-10-26 — Dense retrieval, grounded answers, and persistence verification
+
+- Stage: Stage 3
+- Status: completed with mocked models
+- Scope: Added the `query embedding → retrieval → grounded generation → structured answer` LangGraph path and verified persistence on a local Qdrant server without the real corpus or hosted-model requests.
+- Changed:
+  - `src/insightflow/rag/retrieval.py` — adds `DenseRetriever`, `BudgetedContextAssembler`, and `render_context_block`.
+  - `src/insightflow/rag/protocols.py`, `src/insightflow/storage/qdrant.py` — adds the `ChunkSearcher` protocol; `QdrantStore.search_chunks` returns domain `RetrievedChunk`s with document-ID and MIME-type filters and an optional score threshold. The old `search` method, which returned Qdrant `ScoredPoint`s, was removed. `mime_type` is now a keyword payload index.
+  - `src/insightflow/rag/models.py` — `RetrievedChunk` now requires `source_identifier` and `source_name`.
+  - `src/insightflow/agents/` — `AgentState` holds `query`, `context`, and `answer`; adds the `retrieve` node; the `answer` node sends a grounded prompt with numbered passages and returns a fixed answer without a model call when nothing is retrieved; `build_graph` wires `retrieve → answer`.
+  - `src/insightflow/api/` — `QueryResponse.sources` is now a list of `SourceReference` objects (breaking change from `list[str]`); new embedding, chunk-searcher, retriever, and context-assembler dependencies; `StorageError` maps to HTTP 503 `storage_unavailable`; provider error messages now say "model provider" because embedding failures share them.
+  - `pyproject.toml` — registers the `qdrant` marker.
+  - Tests: `tests/unit/test_retrieval.py`, `tests/unit/test_agent_graph.py`, `tests/integration/test_qdrant_persistence.py` (opt-in), and a rewritten `tests/integration/test_query_api.py`.
+- Validation:
+  - `docker compose up -d qdrant` — Qdrant v1.18.2 started and reported healthy.
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues in 40 source files
+  - `pytest` — passed: 126 passed, 1 skipped (the `qdrant` test without `QDRANT_TEST_URL`)
+  - `QDRANT_TEST_URL=http://localhost:6333 pytest -m qdrant` — passed: 1 passed; ingestion, search from a new client, `skipped` on re-ingestion, and payload indexes on the server.
+  - Manual restart check (script outside the repository, synthetic documents, fake keyword embeddings): ingested two documents into `insightflow_restart_check`, ran `docker compose restart qdrant`, then retrieval returned `river.txt` at rank 1 with its content and re-ingestion reported both documents `skipped`. The collection was deleted afterwards.
+- Decisions:
+  - Context tokens are counted with the embedding model's tokenizer as an approximation of the chat model's count.
+  - `sources` lists every passage given to the model, numbered to match `[n]` citations; answers are not parsed to filter cited passages.
+  - Language and date filters in `RetrievalQuery` raise `ValueError` because stored payloads do not carry those fields.
+- Remaining:
+  - No run with a hosted embedding or chat model, and no ingestion of the real `corpus/` (deferred by request).
+  - Ingestion retries (`max_retries`), deletion of documents removed from the corpus, and chunk-size checks against `EMBEDDING_MAX_INPUT_TOKENS` are not implemented.
+  - Stage 1 still lacks pinned versions for several runtime dependencies.
 - Commit: `uncommitted`

@@ -1,15 +1,13 @@
 """Shared LangGraph workflow state."""
 
-from typing import Any, TypedDict
+from typing import TypedDict
+
+from insightflow.rag.models import AssembledContext
 
 
 class AgentState(TypedDict, total=False):
-    """State passed between initial workflow nodes."""
+    """State passed between the retrieval and answer nodes."""
 
     query: str
-    messages: list[dict[str, Any]]
-    retrieved_context: list[dict[str, Any]]
+    context: AssembledContext
     answer: str
-    sources: list[str]
-    error: str
-
