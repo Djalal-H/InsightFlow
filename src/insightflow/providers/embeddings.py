@@ -4,8 +4,27 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from litellm import aembedding, token_counter
+from litellm.exceptions import (
+    APIConnectionError,
+    APIError,
+    APIResponseValidationError,
+    AuthenticationError,
+    BadRequestError,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    ServiceUnavailableError,
+    Timeout,
+    UnprocessableEntityError,
+)
 
-from insightflow.core.exceptions import ProviderError
+from insightflow.core.exceptions import (
+    ProviderConfigurationError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+)
 
 
 class EmbeddingProvider(Protocol):
@@ -45,12 +64,36 @@ class LiteLLMEmbeddingProvider:
 
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed document inputs while preserving their input order."""
-        response = await aembedding(
-            model=self._model,
-            input=list(texts),
-            **self._request_options(),
-        )
-        vectors = [item["embedding"] for item in response.data]
+        try:
+            response = await aembedding(
+                model=self._model,
+                input=list(texts),
+                **self._request_options(),
+            )
+        except Timeout as exc:
+            raise ProviderTimeoutError from exc
+        except RateLimitError as exc:
+            raise ProviderRateLimitError from exc
+        except (
+            AuthenticationError,
+            BadRequestError,
+            NotFoundError,
+            PermissionDeniedError,
+        ) as exc:
+            raise ProviderConfigurationError from exc
+        except (
+            APIConnectionError,
+            APIError,
+            APIResponseValidationError,
+            InternalServerError,
+            ServiceUnavailableError,
+            UnprocessableEntityError,
+        ) as exc:
+            raise ProviderError from exc
+        try:
+            vectors = [item["embedding"] for item in response.data]
+        except (AttributeError, KeyError, TypeError) as exc:
+            raise ProviderError("The embedding provider returned an invalid response") from exc
         if len(vectors) != len(texts):
             raise ProviderError("The embedding provider returned an unexpected vector count")
         return vectors

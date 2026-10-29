@@ -47,7 +47,7 @@ def element(
 # ---- Section grouping -----------------------------------------------------
 
 
-def test_chunker_produces_one_chunk_per_section_when_within_target() -> None:
+async def test_chunker_produces_one_chunk_per_section_when_within_target() -> None:
     """Two distinct sections, each small, produce exactly two chunks."""
     elements = [
         element("e1", "Intro text.", ["Introduction"], 0),
@@ -58,14 +58,14 @@ def test_chunker_produces_one_chunk_per_section_when_within_target() -> None:
         strategy="structure_recursive", target_tokens=100, max_tokens=200, min_tokens=1
     )
 
-    chunks = StructureRecursiveChunker().chunk(document, config)
+    chunks = await StructureRecursiveChunker().chunk(document, config)
 
     assert len(chunks) == 2
     assert chunks[0].heading_path == ["Introduction"]
     assert chunks[1].heading_path == ["History"]
 
 
-def test_chunker_splits_a_section_that_exceeds_target_tokens() -> None:
+async def test_chunker_splits_a_section_that_exceeds_target_tokens() -> None:
     """A section larger than target_tokens is split into multiple chunks."""
     long_text = "The university offers many academic programs. " * 10
     elements = [
@@ -78,7 +78,7 @@ def test_chunker_splits_a_section_that_exceeds_target_tokens() -> None:
         strategy="structure_recursive", target_tokens=30, max_tokens=50, min_tokens=1
     )
 
-    chunks = StructureRecursiveChunker().chunk(document, config)
+    chunks = await StructureRecursiveChunker().chunk(document, config)
 
     assert len(chunks) > 1
     assert all(chunk.heading_path == ["Programs"] for chunk in chunks)
@@ -88,7 +88,7 @@ def test_chunker_splits_a_section_that_exceeds_target_tokens() -> None:
 # ---- Oversized single elements --------------------------------------------
 
 
-def test_chunker_splits_a_single_oversized_element_by_sentence() -> None:
+async def test_chunker_splits_a_single_oversized_element_by_sentence() -> None:
     """One element bigger than max_tokens is broken into sentence-bounded pieces."""
     huge_text = "This is one sentence. " * 40
     elements = [element("e1", huge_text, ["Notes"], 0)]
@@ -97,7 +97,7 @@ def test_chunker_splits_a_single_oversized_element_by_sentence() -> None:
         strategy="structure_recursive", target_tokens=20, max_tokens=30, min_tokens=1
     )
 
-    chunks = StructureRecursiveChunker().chunk(document, config)
+    chunks = await StructureRecursiveChunker().chunk(document, config)
 
     assert len(chunks) > 1
     assert all(chunk.token_count <= config.max_tokens for chunk in chunks)
@@ -108,7 +108,7 @@ def test_chunker_splits_a_single_oversized_element_by_sentence() -> None:
 # ---- Merging undersized chunks --------------------------------------------
 
 
-def test_chunker_merges_undersized_trailing_chunk_within_same_section() -> None:
+async def test_chunker_merges_undersized_trailing_chunk_within_same_section() -> None:
     """A tiny leftover chunk in the same section as its predecessor gets merged."""
     filler = "Word. " * 15  # deliberately crosses target_tokens once
     elements = [
@@ -120,14 +120,14 @@ def test_chunker_merges_undersized_trailing_chunk_within_same_section() -> None:
         strategy="structure_recursive", target_tokens=8, max_tokens=100, min_tokens=5
     )
 
-    chunks = StructureRecursiveChunker().chunk(document, config)
+    chunks = await StructureRecursiveChunker().chunk(document, config)
 
     # merged back into one chunk since both share the section and fit under max_tokens
     assert len(chunks) == 1
     assert "Tiny." in chunks[0].content
 
 
-def test_chunker_leaves_trailing_undersized_section_alone_with_no_neighbor() -> None:
+async def test_chunker_leaves_trailing_undersized_section_alone_with_no_neighbor() -> None:
     """A short section with no same-heading neighbor cannot merge and stays on its own."""
     elements = [
         element("e1", "A reasonably sized introduction paragraph here.", ["Introduction"], 0),
@@ -138,7 +138,7 @@ def test_chunker_leaves_trailing_undersized_section_alone_with_no_neighbor() -> 
         strategy="structure_recursive", target_tokens=50, max_tokens=100, min_tokens=20
     )
 
-    chunks = StructureRecursiveChunker().chunk(document, config)
+    chunks = await StructureRecursiveChunker().chunk(document, config)
 
     assert len(chunks) == 2
     assert chunks[1].heading_path == ["History"]
@@ -148,7 +148,7 @@ def test_chunker_leaves_trailing_undersized_section_alone_with_no_neighbor() -> 
 # ---- Determinism and linking ----------------------------------------------
 
 
-def test_chunker_output_is_deterministic() -> None:
+async def test_chunker_output_is_deterministic() -> None:
     """The same document and config produce identical chunk IDs every time."""
     elements = [
         element("e1", "Intro text.", ["Introduction"], 0),
@@ -158,13 +158,13 @@ def test_chunker_output_is_deterministic() -> None:
     config = ChunkingConfig(strategy="structure_recursive")
 
     chunker = StructureRecursiveChunker()
-    first = chunker.chunk(document, config)
-    second = chunker.chunk(document, config)
+    first = await chunker.chunk(document, config)
+    second = await chunker.chunk(document, config)
 
     assert [chunk.chunk_id for chunk in first] == [chunk.chunk_id for chunk in second]
 
 
-def test_chunker_links_chunks_sequentially() -> None:
+async def test_chunker_links_chunks_sequentially() -> None:
     """previous_chunk_id and next_chunk_id correctly chain across three chunks."""
     long_text = "The university offers many academic programs. " * 10
     elements = [
@@ -177,7 +177,7 @@ def test_chunker_links_chunks_sequentially() -> None:
         strategy="structure_recursive", target_tokens=30, max_tokens=50, min_tokens=1
     )
 
-    chunks = StructureRecursiveChunker().chunk(document, config)
+    chunks = await StructureRecursiveChunker().chunk(document, config)
     assert len(chunks) >= 3
 
     assert chunks[0].previous_chunk_id is None
@@ -187,7 +187,7 @@ def test_chunker_links_chunks_sequentially() -> None:
         assert chunks[i + 1].previous_chunk_id == chunks[i].chunk_id
 
 
-def test_chunker_never_exceeds_max_tokens() -> None:
+async def test_chunker_never_exceeds_max_tokens() -> None:
     """No produced chunk exceeds the configured hard token ceiling."""
     long_text = "Sentence with several words in it. " * 20
     elements = [element("e1", long_text, ["Notes"], 0)]
@@ -196,7 +196,7 @@ def test_chunker_never_exceeds_max_tokens() -> None:
         strategy="structure_recursive", target_tokens=15, max_tokens=25, min_tokens=1
     )
 
-    chunks = StructureRecursiveChunker().chunk(document, config)
+    chunks = await StructureRecursiveChunker().chunk(document, config)
 
     for chunk in chunks:
         assert _count_tokens(chunk.content) <= config.max_tokens

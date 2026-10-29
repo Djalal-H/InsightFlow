@@ -4,7 +4,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from litellm.exceptions import AuthenticationError, RateLimitError, Timeout
 
+from insightflow.core.exceptions import (
+    ProviderConfigurationError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+)
 from insightflow.providers.embeddings import (
     EmbeddingProvider,
     LiteLLMEmbeddingProvider,
@@ -98,3 +105,48 @@ def test_embedding_provider_counts_tokens_with_its_configured_model() -> None:
         model="hosted/test-embedding",
         text="three model tokens",
     )
+
+
+@pytest.mark.parametrize(
+    ("litellm_error", "application_error"),
+    [
+        (
+            AuthenticationError(
+                message="secret authentication detail",
+                llm_provider="openai",
+                model="test-model",
+            ),
+            ProviderConfigurationError,
+        ),
+        (
+            Timeout(message="secret timeout detail", model="test-model", llm_provider="openai"),
+            ProviderTimeoutError,
+        ),
+        (
+            RateLimitError(
+                message="secret rate-limit detail",
+                llm_provider="openai",
+                model="test-model",
+            ),
+            ProviderRateLimitError,
+        ),
+    ],
+)
+async def test_embedding_provider_maps_litellm_errors(
+    litellm_error: Exception,
+    application_error: type[ProviderError],
+) -> None:
+    """LiteLLM failures become stable application errors without provider details."""
+    provider = LiteLLMEmbeddingProvider("hosted/test-embedding")
+
+    with (
+        patch(
+            "insightflow.providers.embeddings.aembedding",
+            new_callable=AsyncMock,
+            side_effect=litellm_error,
+        ),
+        pytest.raises(application_error) as error,
+    ):
+        await provider.embed_documents(["document"])
+
+    assert "secret" not in str(error.value)

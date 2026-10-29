@@ -86,7 +86,7 @@ class StructureRecursiveChunker:
     strategy_name = "structure_recursive"
     strategy_version = "1.0.0"
 
-    def chunk(self, document: NormalizedDocument, config: ChunkingConfig) -> list[Chunk]:
+    async def chunk(self, document: NormalizedDocument, config: ChunkingConfig) -> list[Chunk]:
         pending: list[_PendingChunk] = []
 
         for section in _group_by_section(document.elements):

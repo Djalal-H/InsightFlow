@@ -144,6 +144,7 @@ class IngestionWarning(DomainModel):
 class IngestionResult(DomainModel):
     """Outcome for one document in a corpus ingestion run."""
 
+    source_identifier: NonEmptyString
     status: IngestionStatus
     warnings: list[IngestionWarning] = Field(default_factory=list)
     document_id: str | None = None
@@ -186,6 +187,8 @@ class RetrievedChunk(DomainModel):
     """A ranked domain chunk returned by retrieval."""
 
     chunk: Chunk
+    source_identifier: NonEmptyString
+    source_name: NonEmptyString
     score: float = Field(allow_inf_nan=False)
     rank: int = Field(ge=1)
 

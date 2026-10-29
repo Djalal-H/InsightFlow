@@ -61,7 +61,14 @@ pytest
 ```
 
 These checks are configured in `pyproject.toml`. Model and embedding API calls should be mocked
-in unit tests; real credentials belong only in opt-in integration tests.
+in unit tests; real credentials belong only in opt-in integration tests. Qdrant-backed unit tests
+use the client's in-memory mode. Tests marked `qdrant` need a running server and are skipped
+unless `QDRANT_TEST_URL` is set; they use synthetic documents and fake embeddings:
+
+```bash
+docker compose up -d qdrant
+QDRANT_TEST_URL=http://localhost:6333 pytest -m qdrant
+```
 
 ## Architecture
 
@@ -97,6 +104,30 @@ Chunking is asynchronous because it embeds sentence units through `EmbeddingProv
 component is available from `insightflow.rag`; parser-to-Qdrant ingestion orchestration remains
 separate Stage 3 work.
 
+## Corpus ingestion
+
+`IngestionPipeline` in `insightflow.rag.ingestion` discovers files under a corpus directory,
+selects a parser by file type (`.txt`, `.md`, `.docx`, `.pdf`), chunks with the configured
+strategy, embeds `embedding_text` through `EmbeddingProvider`, and writes one Qdrant point per
+chunk. Each point stores the chunk fields plus source provenance (`source_identifier`,
+`source_name`, page range, heading path).
+
+Ingestion requires `EMBEDDING_PROVIDER`, `LITELLM_EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, and
+`EMBEDDING_MAX_INPUT_TOKENS`. The collection is created with the named vector
+`QDRANT_VECTOR_NAME`; an existing collection whose vector size or distance differs is refused,
+not migrated.
+
+```bash
+docker compose up -d qdrant
+PYTHONPATH=src python -m insightflow.ingest corpus/          # or set RAG_CORPUS_DIR
+PYTHONPATH=src python -m insightflow.ingest corpus/ --force  # re-embed unchanged documents
+```
+
+The command prints one line per document with status `completed`, `skipped`, or `rejected`.
+A document is `skipped` when Qdrant already holds every chunk of the same content version
+produced with the same parser, chunker, chunking settings, and embedding model. A changed
+document replaces all of its previous points. Ingestion makes billable embedding requests.
+
 For manual inspection with real sentence embeddings, open
 `notebooks/inspect_max_min_chunking.ipynb`, select the repository `.venv` kernel, set
 `DOCUMENT_PATH`, and run the cells in order. The notebook reads model credentials from `.env`,
@@ -104,3 +135,37 @@ prints complete chunk provenance and previews, and performs no Qdrant writes. It
 makes billable provider requests; the optional JSON export remains disabled until `OUTPUT_PATH` is
 set explicitly. Clear executed notebook outputs before committing to avoid retaining document
 content in Git.
+
+## Grounded query workflow
+
+`POST /query` runs a two-node LangGraph workflow:
+
+1. `retrieve` embeds the question with `EmbeddingProvider.embed_query`, searches Qdrant for
+   `RAG_CANDIDATE_TOP_K` chunks (`DenseRetriever`), and selects passages in rank order until
+   `RAG_GENERATION_MAX_CHUNKS` or `RAG_CONTEXT_TOKEN_BUDGET` is reached
+   (`BudgetedContextAssembler`). Tokens are counted with the embedding model's tokenizer, which
+   approximates the chat model's count.
+2. `answer` sends the numbered passages to the chat model with an instruction to answer only from
+   them and cite passage numbers such as `[1]`. When nothing is retrieved, the route returns a fixed
+   "could not find" answer without calling the chat model.
+
+```json
+{
+  "answer": "InsightFlow is an API-first RAG platform [1].",
+  "sources": [
+    {
+      "citation": 1,
+      "source_identifier": "PDF/overview.pdf",
+      "source_name": "overview.pdf",
+      "chunk_id": "…",
+      "page_start": 2,
+      "page_end": 2,
+      "score": 0.82
+    }
+  ]
+}
+```
+
+`sources` lists every passage given to the model; `citation` matches the numbers in the answer.
+Provider failures return the sanitized `provider_*` errors, and Qdrant failures (including a
+missing collection before the first ingestion) return HTTP 503 with code `storage_unavailable`.

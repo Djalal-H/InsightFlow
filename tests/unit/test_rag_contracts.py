@@ -201,10 +201,10 @@ def test_chunk_rejects_invalid_page_ranges_and_self_links() -> None:
 def test_ingestion_result_enforces_status_semantics() -> None:
     """Usable versions need identity and rejected versions cannot report chunks."""
     with pytest.raises(ValidationError, match="document_id is required"):
-        IngestionResult(status="completed", chunk_count=1)
+        IngestionResult(source_identifier="docs/a.txt", status="completed", chunk_count=1)
 
     with pytest.raises(ValidationError, match="cannot report stored chunks"):
-        IngestionResult(status="rejected", chunk_count=1)
+        IngestionResult(source_identifier="docs/a.txt", status="rejected", chunk_count=1)
 
 
 def test_retrieval_query_validates_limits_and_date_range() -> None:
@@ -315,7 +315,13 @@ def test_runtime_protocols_accept_provider_neutral_implementations() -> None:
     class FakeRetriever:
         async def retrieve(self, query: RetrievalQuery) -> list[RetrievedChunk]:
             del query
-            return [RetrievedChunk(chunk=make_chunk(), score=0.9, rank=1)]
+            return [RetrievedChunk(
+                    chunk=make_chunk(),
+                    source_identifier="docs/a.txt",
+                    source_name="a.txt",
+                    score=0.9,
+                    rank=1,
+                )]
 
     assert isinstance(FakeParser(), DocumentParser)
     assert isinstance(FakeChunker(), Chunker)

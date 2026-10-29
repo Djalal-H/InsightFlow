@@ -17,6 +17,9 @@ addopts = "--strict-config --strict-markers --cov=insightflow --cov-report=term-
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "qdrant: needs a running Qdrant server; runs only when QDRANT_TEST_URL is set",
+]
 
 [tool.coverage.run]
 branch = true
