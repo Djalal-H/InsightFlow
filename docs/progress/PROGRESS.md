@@ -253,4 +253,4 @@
   - No run with a hosted model: router and judge prompt quality, JSON reliability on NVIDIA NIM, streaming with LiteLLM, and the real cost and latency of the extra calls are unverified.
   - Threads have no owner and no expiry; authentication is Stage 8 work.
   - Parallel retrieval for decomposed queries and human approval (optional Stage 4 work) are not implemented.
-- Commit: `uncommitted`
+- Commit: `eef4a6f`
