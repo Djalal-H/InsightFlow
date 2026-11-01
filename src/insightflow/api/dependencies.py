@@ -3,7 +3,8 @@
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from insightflow.core.config import Settings, get_settings
 from insightflow.core.exceptions import ProviderConfigurationError
@@ -64,3 +65,20 @@ def get_context_assembler(embedding_provider: EmbeddingProviderDependency) -> Co
 
 RetrieverDependency = Annotated[Retriever, Depends(get_retriever)]
 ContextAssemblerDependency = Annotated[ContextAssembler, Depends(get_context_assembler)]
+
+
+def get_checkpointer(request: Request) -> BaseCheckpointSaver[str] | None:
+    """Return the application checkpointer opened at startup, or `None` when disabled.
+
+    The checkpointer is opened by the application lifespan. Without a lifespan (for example in
+    tests that use `httpx.ASGITransport`), requests are stateless unless this is overridden.
+    """
+    checkpointer: BaseCheckpointSaver[str] | None = getattr(
+        request.app.state, "checkpointer", None
+    )
+    return checkpointer
+
+
+CheckpointerDependency = Annotated[
+    BaseCheckpointSaver[str] | None, Depends(get_checkpointer)
+]

@@ -16,8 +16,11 @@ def make_retrieve_node(
     """Bind retrieval components and return a LangGraph-compatible retrieve node."""
 
     async def retrieve_node(state: AgentState) -> AgentState:
-        query = state["query"]
+        query = state.get("retrieval_query") or state["query"]
         candidates = await retriever.retrieve(RetrievalQuery(text=query, top_k=top_k))
-        return {"context": assembler.assemble(query, candidates, budget)}
+        return {
+            "context": assembler.assemble(query, candidates, budget),
+            "retrieval_queries": [*state.get("retrieval_queries", []), query],
+        }
 
     return retrieve_node

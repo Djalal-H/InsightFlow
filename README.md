@@ -138,16 +138,39 @@ content in Git.
 
 ## Grounded query workflow
 
-`POST /query` runs a two-node LangGraph workflow:
+`POST /query` runs a LangGraph workflow with conditional edges:
 
-1. `retrieve` embeds the question with `EmbeddingProvider.embed_query`, searches Qdrant for
+```text
+route ─┬─ direct ────────────────────────→ answer → finalize
+       └─ retrieve → retrieve → answer → verify ─┬─ finalize
+                        ▲                         │
+                        └──── rewrite ◄───────────┘  (failed, attempts left)
+```
+
+1. `route` asks the chat model for JSON: `retrieve` or `direct` (greetings, questions about the
+   assistant, or questions that the conversation already answers), plus a self-contained version
+   of the question that resolves references to earlier turns. Unreadable output falls back to
+   `retrieve` with the question as written. `AGENT_ROUTER_ENABLED=false` skips this model call.
+2. `retrieve` embeds the retrieval query with `EmbeddingProvider.embed_query`, searches Qdrant for
    `RAG_CANDIDATE_TOP_K` chunks (`DenseRetriever`), and selects passages in rank order until
    `RAG_GENERATION_MAX_CHUNKS` or `RAG_CONTEXT_TOKEN_BUDGET` is reached
    (`BudgetedContextAssembler`). Tokens are counted with the embedding model's tokenizer, which
    approximates the chat model's count.
-2. `answer` sends the numbered passages to the chat model with an instruction to answer only from
-   them and cite passage numbers such as `[1]`. When nothing is retrieved, the route returns a fixed
-   "could not find" answer without calling the chat model.
+3. `answer` sends the numbered passages and the last `AGENT_HISTORY_TURNS` turns to the chat model,
+   with an instruction to answer only from the passages and cite them as `[1]`. When nothing is
+   retrieved, it returns a fixed "could not find" answer without a model call. Direct answers use
+   only the conversation.
+4. `verify` first checks citations without a model (the answer is not empty, cites at least one
+   passage, and cites only passages that exist). If that passes and
+   `AGENT_VERIFIER_LLM_ENABLED=true`, an LLM judge returns JSON that says whether every claim is
+   supported.
+5. `rewrite` runs when verification fails and fewer than `AGENT_MAX_ATTEMPTS` answers were made.
+   It asks the model for a new retrieval query, and the workflow retrieves again. When the
+   attempts are used up, the last answer is returned with `verification.status = "failed"`.
+6. `finalize` adds the turn to the conversation history.
+
+A retrieved question makes at most `3 + 3 × (AGENT_MAX_ATTEMPTS − 1)` chat calls: router,
+answer, and judge, plus rewrite, answer, and judge for each retry. With the defaults that is 6.
 
 ```json
 {
@@ -162,10 +185,56 @@ content in Git.
       "page_end": 2,
       "score": 0.82
     }
-  ]
+  ],
+  "thread_id": "3f1c…",
+  "verification": {"status": "passed", "method": "llm", "issues": []},
+  "metadata": {
+    "route": "retrieve",
+    "attempts": 1,
+    "retrieval_queries": ["What is InsightFlow?"],
+    "nodes": ["route", "retrieve", "answer", "verify", "finalize"],
+    "duration_ms": 2140
+  }
 }
 ```
 
-`sources` lists every passage given to the model; `citation` matches the numbers in the answer.
+`sources` lists every passage given to the model in the last attempt; `citation` matches the
+numbers in the answer. `verification.status` is `passed`, `failed`, `unchecked` (the judge reply
+could not be read), or `skipped` (direct answers and empty retrieval).
 Provider failures return the sanitized `provider_*` errors, and Qdrant failures (including a
 missing collection before the first ingestion) return HTTP 503 with code `storage_unavailable`.
+
+### Conversation threads
+
+The workflow state is saved by a LangGraph checkpointer after every step.
+`CHECKPOINT_BACKEND=sqlite` (the default) stores it in `CHECKPOINT_SQLITE_PATH`
+(`data/checkpoints.sqlite`, ignored by Git), so threads survive a restart; `memory` keeps them
+only while the process runs; `none` makes every request stateless (`thread_id` is then `null`).
+
+- Send `thread_id` from an earlier response to continue a conversation; omit it to start a new
+  thread. Identifiers have 1–128 characters from `A–Z a–z 0–9 _ -`.
+- `GET /threads/{thread_id}` returns the completed turns; `DELETE /threads/{thread_id}` removes
+  the thread. Unknown threads return HTTP 404 with code `thread_not_found`.
+- Concurrent requests on the same thread are not serialized. Send one request per thread at a
+  time.
+
+### Streaming
+
+`POST /query/stream` accepts the same body and runs the same workflow, but returns Server-Sent
+Events:
+
+| Event | Data |
+| --- | --- |
+| `node` | `{"node": "route", "route": "retrieve"}` after each step; `retrieve` adds `passages`, `verify` adds `status` |
+| `token` | `{"attempt": 1, "text": "…"}`: a piece of the answer |
+| `attempt` | `{"attempt": 2}`: a retry started; discard the tokens of earlier attempts |
+| `final` | the complete `QueryResponse` |
+| `error` | `{"error": {"code": …, "message": …}}`: the same sanitized errors as `POST /query` |
+
+```bash
+curl -N localhost:8000/query/stream -H 'content-type: application/json' \
+  -d '{"query": "What is InsightFlow?"}'
+```
+
+Request validation and configuration errors that occur before the stream starts return normal
+HTTP errors. After the stream starts, the status is 200 and a failure is sent as one `error` event.

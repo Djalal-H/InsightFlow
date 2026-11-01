@@ -190,3 +190,80 @@ async def test_provider_rejects_malformed_responses(response: object) -> None:
         await provider.complete(MESSAGES)
 
     assert not raised.value.args
+
+
+class FakeStream:
+    """Async iterator over stream chunks that can fail part of the way through."""
+
+    def __init__(self, chunks: list[object], error: Exception | None = None) -> None:
+        self.chunks = chunks
+        self.error = error
+
+    def __aiter__(self) -> "FakeStream":
+        return self
+
+    async def __anext__(self) -> object:
+        if self.chunks:
+            return self.chunks.pop(0)
+        if self.error is not None:
+            raise self.error
+        raise StopAsyncIteration
+
+
+def delta(content: object) -> object:
+    return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=content))])
+
+
+async def test_provider_streams_text_and_skips_empty_chunks() -> None:
+    provider = build_provider()
+    stream = FakeStream(
+        [delta("Hello"), delta(None), SimpleNamespace(choices=[]), delta(""), delta(" world")]
+    )
+
+    with patch(
+        "insightflow.providers.llm.acompletion", new_callable=AsyncMock, return_value=stream
+    ) as completion:
+        pieces = [piece async for piece in provider.stream(MESSAGES)]
+
+    assert pieces == ["Hello", " world"]
+    completion.assert_awaited_once_with(
+        model=MODEL,
+        messages=MESSAGES,
+        stream=True,
+        api_key="test-api-key",
+        api_base="https://provider.test/v1",
+    )
+
+
+async def test_provider_translates_failures_when_a_stream_starts() -> None:
+    provider = build_provider()
+    error = RateLimitError(message="secret", llm_provider="openai", model="test-model")
+
+    with (
+        patch("insightflow.providers.llm.acompletion", new_callable=AsyncMock, side_effect=error),
+        pytest.raises(ProviderRateLimitError) as raised,
+    ):
+        [piece async for piece in provider.stream(MESSAGES)]
+
+    assert raised.value.__cause__ is error
+
+
+async def test_provider_translates_failures_during_a_stream() -> None:
+    provider = build_provider()
+    error = APIConnectionError(message="secret", llm_provider="openai", model="test-model")
+    pieces: list[str] = []
+
+    with (
+        patch(
+            "insightflow.providers.llm.acompletion",
+            new_callable=AsyncMock,
+            return_value=FakeStream([delta("partial")], error),
+        ),
+        pytest.raises(ProviderError) as raised,
+    ):
+        async for piece in provider.stream(MESSAGES):
+            pieces.append(piece)
+
+    assert pieces == ["partial"]
+    assert raised.value.__cause__ is error
+    assert not raised.value.args

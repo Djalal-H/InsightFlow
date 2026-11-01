@@ -27,6 +27,10 @@ class StorageError(InsightFlowError):
     """A vector-store operation failed."""
 
 
+class ThreadNotFoundError(InsightFlowError):
+    """A conversation thread has no stored checkpoint."""
+
+
 DocumentRejectionReason = Literal[
     "unsupported_format",
     "encrypted_pdf",

@@ -2,8 +2,8 @@
 
 ## Current status
 
-- Current stage: Stage 3 (implementation complete; in review as PR #7)
-- Last updated: 2026-10-29
+- Current stage: Stage 4 (implemented on `feature/stage4-agent-workflow`; verified with mocks only)
+- Last updated: 2026-11-01
 - Overall state: in progress
 
 ## Stage summary
@@ -13,7 +13,7 @@
 | Stage 1 | in progress | Repository foundation is present, but tests, runtime dependency pins, and mypy validation remain incomplete |
 | Stage 2 | complete    | Query workflow, provider validation and error mapping, and mocked contract coverage verified                |
 | Stage 3 | complete | Ingestion, Qdrant persistence, dense retrieval, and grounded answers with sources verified with mocks and on a real Qdrant server; a hosted-model run on `corpus/MD` was reported working by the author (2026-10-29) |
-| Stage 4 | not started | —                                                                                                          |
+| Stage 4 | in progress | Router, verifier, bounded retries, execution metadata, SQLite checkpointer with threads, and SSE streaming verified with mocks; no hosted-model run yet |
 | Stage 5 | not started | —                                                                                                          |
 | Stage 6 | not started | —                                                                                                          |
 | Stage 7 | not started | —                                                                                                          |
@@ -220,3 +220,37 @@
   - Chat and embeddings share `LITELLM_API_KEY` and `LITELLM_API_BASE`; a separate embedding provider needs new settings.
   - Embedding requests do not send `input_type` (`passage` for documents, `query` for questions), which NVIDIA retrieval models can use.
 - Commit: `uncommitted`
+
+### 2026-11-01 — Stage 4 agent workflow, conversation threads, and streaming
+
+- Stage: Stage 4
+- Status: partial (implementation complete; verified with mocks only)
+- Scope: Replaced the fixed `retrieve → answer` graph with a routed, verified workflow with bounded retries; added structured execution metadata, a persistent checkpointer with conversation threads, and an SSE endpoint.
+- Changed:
+  - `src/insightflow/agents/graph.py` — `route → (retrieve → answer → verify ⇄ rewrite | answer) → finalize` with pure routing functions; `AGENT_MAX_ATTEMPTS` bounds the retry loop; each node is traced in `node_trace`.
+  - `src/insightflow/agents/nodes/` — new `route` (LLM JSON: `retrieve`/`direct` and a standalone query), `verify` (citation checks, then an optional LLM judge), `rewrite` (new retrieval query), `finalize` (appends the turn to `history`); `answer` adds history, a direct mode, and token streaming; `retrieve` uses the standalone or rewritten query.
+  - `src/insightflow/agents/structured.py`, `models.py`, `state.py`, `checkpoint.py` — prompted JSON parsing with safe fallbacks; workflow models; per-turn state reset (`new_turn_input`); checkpointer factory (`none`/`memory`/`sqlite`) with a serializer allowlist for the state's Pydantic types.
+  - `src/insightflow/api/` — `QueryResponse` adds `thread_id`, `verification`, and `metadata` (`answer` and `sources` keep their shape); `QueryRequest` adds `thread_id`; new `POST /query/stream` (FastAPI native SSE), `GET /threads/{id}`, `DELETE /threads/{id}`; `describe_error` shares the sanitized error mapping with the stream; new `thread_not_found` (404).
+  - `src/insightflow/main.py` — lifespan opens the checkpointer once and closes it at shutdown.
+  - `src/insightflow/providers/llm.py` — `stream` now maps LiteLLM failures (at start and during iteration) to the same sanitized provider errors as `complete`; usage-only stream chunks are skipped.
+  - `requirements.txt` — adds `langgraph-checkpoint-sqlite==3.1.3` (brings `aiosqlite`); installing it upgraded `langgraph-checkpoint` from 4.1.1 to 4.3.1.
+  - `.env.example`, `.gitignore` (`data/`), `README.md`, `CLAUDE.md` — new settings, endpoints, and workflow description.
+  - Tests: new `tests/fakes.py`, `tests/unit/test_agent_nodes.py`, `tests/unit/test_structured_json.py`, `tests/unit/test_app_lifespan.py`, `tests/integration/test_query_stream_api.py`; rewritten `tests/unit/test_agent_graph.py`; extended `tests/integration/test_query_api.py` and `tests/unit/test_llm_provider.py`.
+- Validation:
+  - `uv pip install --python .venv/bin/python langgraph-checkpoint-sqlite` — installed `langgraph-checkpoint-sqlite` 3.1.3, `aiosqlite` 0.22.1, `sqlite-vec` 0.1.9; upgraded `langgraph-checkpoint` 4.1.1 → 4.3.1.
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues in 49 source files
+  - `pytest -p no:cacheprovider -q` — passed: 215 passed, 1 skipped (the `qdrant` test without `QDRANT_TEST_URL`); coverage 92%, every `agents/` module at 92–100%.
+  - `git diff --check` — passed
+  - `CHECKPOINT_SQLITE_PATH=<scratch>/checkpoints.sqlite uvicorn insightflow.main:app --app-dir src --port 8765` — the lifespan created the SQLite file; `GET /openapi.json` returned 200, `GET /threads/unknown` returned 404 `thread_not_found`, and `POST /query` with `thread_id` "bad id" returned 422. No query was sent to a model.
+- Decisions:
+  - LLM nodes ask for JSON in the prompt instead of `response_format`, so every LiteLLM provider works. Unreadable router output falls back to retrieval; unreadable judge output gives `unchecked`; unreadable rewrite output reuses the question.
+  - An answer with no citation fails verification and triggers a retry, including "I do not know" answers, because a new retrieval query can find the missing context. Empty retrieval is `skipped` and is not retried.
+  - When retries are used up, the last answer is returned with `verification.status = "failed"`; it is not hidden.
+  - SQLite is the default checkpointer, so the runtime stays the application plus Qdrant. LangGraph's msgpack serializer restores only allow-listed Pydantic types (`CHECKPOINT_STATE_TYPES`); without the allowlist it logs a deprecation warning, and its strict mode would return dicts.
+  - Concurrent requests on the same thread are not serialized.
+- Remaining:
+  - No run with a hosted model: router and judge prompt quality, JSON reliability on NVIDIA NIM, streaming with LiteLLM, and the real cost and latency of the extra calls are unverified.
+  - Threads have no owner and no expiry; authentication is Stage 8 work.
+  - Parallel retrieval for decomposed queries and human approval (optional Stage 4 work) are not implemented.
+- Commit: `eef4a6f`
