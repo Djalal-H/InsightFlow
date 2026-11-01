@@ -35,9 +35,9 @@ Modular monolith under `src/insightflow/`. Layers talk through protocols and the
 Provider failures are mapped to `core.exceptions.ProviderError` and rendered by
 `api/errors.py`.
 
-### RAG pipeline (Stage 3, in progress)
+### RAG pipeline (Stage 3, complete)
 
-The active work area. Flow: `DocumentSource` → `DocumentParser` → `NormalizedDocument` (ordered
+Flow: `DocumentSource` → `DocumentParser` → `NormalizedDocument` (ordered
 `DocumentElement`s with page/heading provenance) → `Chunker` → `Chunk`s → (planned) embed → Qdrant.
 
 - `rag/protocols.py` defines the boundaries (`DocumentParser`, `Chunker`, `ChunkContextualizer`,
@@ -60,13 +60,29 @@ The active work area. Flow: `DocumentSource` → `DocumentParser` → `Normalize
 - `rag/retrieval.py`: `DenseRetriever` (query embedding → `ChunkSearcher.search_chunks`) and
   `BudgetedContextAssembler` (rank-ordered passages within chunk/token limits, rendered as `[n]`).
 
-### Query workflow
+### Query workflow (Stage 4)
 
-`api/routes/query.py` builds the LangGraph `retrieve → answer` graph (`agents/graph.py`,
-`agents/nodes/`) per request from dependencies in `api/dependencies.py`. `AgentState` carries
-`query`, `context` (`AssembledContext`), and `answer`. API tests override `get_settings`,
-`get_chat_provider`, `get_retriever`, and `get_context_assembler`; without these overrides the
-route opens a real Qdrant client. LiteLLM loads `.env` into `os.environ` on import, so
+`api/routes/query.py` serves `POST /query` and `POST /query/stream` (SSE, FastAPI's native
+`fastapi.sse`). Both build the graph per request with `api/workflow.py:build_workflow` from
+dependencies in `api/dependencies.py`, and map the final state with `to_query_response`.
+The graph (`agents/graph.py`) is `route → (retrieve → answer → verify ⇄ rewrite | answer) →
+finalize`; routing functions are pure and tested without a model. Nodes in `agents/nodes/` are
+built by `make_*_node(deps)` factories; LLM nodes ask for JSON in the prompt and parse it with
+`agents/structured.py`, falling back safely when the output is unusable.
+
+- `AgentState` (`agents/state.py`): `history` persists across turns (append reducer); every
+  other field is per-turn and must be reset with `new_turn_input`, because the checkpointer keeps
+  the previous turn's values.
+- Checkpointer (`agents/checkpoint.py`): opened once by the app lifespan in `main.py` and read by
+  `get_checkpointer`. Pydantic types stored at the top level of the state must be listed in
+  `CHECKPOINT_STATE_TYPES`, or LangGraph's serializer restores them as dicts.
+- `GET/DELETE /threads/{id}` (`api/routes/threads.py`) read and delete checkpointed history.
+
+API tests override `get_settings`, `get_chat_provider`, `get_retriever`, `get_context_assembler`,
+and `get_checkpointer`; without these overrides the route opens a real Qdrant client.
+`httpx.ASGITransport` does not run the lifespan, so requests are stateless unless
+`get_checkpointer` is overridden. `tests/fakes.py:ScriptedChatProvider` replies per workflow role
+(router, answer, judge, rewrite). LiteLLM loads `.env` into `os.environ` on import, so
 `Settings(_env_file=None)` still sees `.env` values: pass values explicitly when a test depends
 on them.
 

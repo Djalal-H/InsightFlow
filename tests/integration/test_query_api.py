@@ -1,13 +1,18 @@
 """HTTP contract tests for POST /query."""
 
 from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
 import httpx
 import pytest
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import InMemorySaver
 
+from insightflow.agents.checkpoint import create_checkpoint_serializer
 from insightflow.agents.nodes.answer import GROUNDED_SYSTEM_PROMPT, NO_CONTEXT_ANSWER
 from insightflow.api.dependencies import (
     get_chat_provider,
+    get_checkpointer,
     get_context_assembler,
     get_retriever,
 )
@@ -24,6 +29,7 @@ from insightflow.main import create_app
 from insightflow.providers.llm import ChatMessage, ChatProvider, LiteLLMChatProvider
 from insightflow.rag.models import Chunk, RetrievalQuery, RetrievedChunk
 from insightflow.rag.retrieval import BudgetedContextAssembler
+from tests.fakes import ScriptedChatProvider
 
 
 class FakeChatProvider:
@@ -98,23 +104,53 @@ def make_candidate() -> RetrievedChunk:
     )
 
 
+# The router and the LLM judge are off in the default test settings, so the route makes exactly
+# one model call. Workflow tests that need them enable them explicitly.
+DETERMINISTIC_SETTINGS: dict[str, Any] = {
+    "agent_router_enabled": False,
+    "agent_verifier_llm_enabled": False,
+    "agent_max_attempts": 1,
+}
+
+
+def make_app(
+    provider: ChatProvider,
+    retriever: FakeRetriever | None = None,
+    *,
+    checkpointer: BaseCheckpointSaver[str] | None = None,
+    **settings: Any,
+) -> Any:
+    """Build an isolated application with overridden adapters."""
+    fake_retriever = retriever or FakeRetriever([make_candidate()])
+    values = {**DETERMINISTIC_SETTINGS, **settings}
+
+    application = create_app()
+    application.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, **values)
+    application.dependency_overrides[get_chat_provider] = lambda: provider
+    application.dependency_overrides[get_retriever] = lambda: fake_retriever
+    application.dependency_overrides[get_checkpointer] = lambda: checkpointer
+    application.dependency_overrides[get_context_assembler] = lambda: BudgetedContextAssembler(
+        lambda text: len(text.split())
+    )
+    return application
+
+
+def client_for(application: Any) -> httpx.AsyncClient:
+    transport = httpx.ASGITransport(app=application)
+    return httpx.AsyncClient(transport=transport, base_url="http://test")
+
+
 async def post_query(
     provider: ChatProvider,
     retriever: FakeRetriever | None = None,
 ) -> httpx.Response:
-    """Send a query to an isolated application with overridden adapters."""
-    fake_retriever = retriever or FakeRetriever([make_candidate()])
-
-    application = create_app()
-    application.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
-    application.dependency_overrides[get_chat_provider] = lambda: provider
-    application.dependency_overrides[get_retriever] = lambda: fake_retriever
-    application.dependency_overrides[get_context_assembler] = lambda: BudgetedContextAssembler(
-        lambda text: len(text.split())
-    )
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    """Send a query to an isolated, stateless application."""
+    async with client_for(make_app(provider, retriever)) as client:
         return await client.post("/query", json={"query": "What is InsightFlow?"})
+
+
+def memory_saver() -> InMemorySaver:
+    return InMemorySaver(serde=create_checkpoint_serializer())
 
 
 async def test_query_answers_from_retrieved_context_with_sources() -> None:
@@ -125,8 +161,18 @@ async def test_query_answers_from_retrieved_context_with_sources() -> None:
     response = await post_query(provider, retriever)
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    assert body["metadata"].pop("duration_ms") >= 0
+    assert body == {
         "answer": "InsightFlow is a RAG platform [1].",
+        "thread_id": None,
+        "verification": {"status": "passed", "method": "deterministic", "issues": []},
+        "metadata": {
+            "route": "retrieve",
+            "attempts": 1,
+            "retrieval_queries": ["What is InsightFlow?"],
+            "nodes": ["route", "retrieve", "answer", "verify", "finalize"],
+        },
         "sources": [
             {
                 "citation": 1,
@@ -155,7 +201,9 @@ async def test_query_without_retrieved_context_does_not_call_the_model() -> None
     response = await post_query(provider, FakeRetriever([]))
 
     assert response.status_code == 200
-    assert response.json() == {"answer": NO_CONTEXT_ANSWER, "sources": []}
+    body = response.json()
+    assert (body["answer"], body["sources"]) == (NO_CONTEXT_ANSWER, [])
+    assert body["verification"]["status"] == "skipped"
     assert provider.messages is None
 
 
@@ -267,3 +315,139 @@ def test_query_openapi_documents_stable_errors() -> None:
     responses = create_app().openapi()["paths"]["/query"]["post"]["responses"]
 
     assert {"429", "502", "503", "504"} <= responses.keys()
+
+
+def test_query_openapi_documents_stream_and_thread_endpoints() -> None:
+    paths = create_app().openapi()["paths"]
+
+    assert "text/event-stream" in paths["/query/stream"]["post"]["responses"]["200"]["content"]
+    assert "404" in paths["/threads/{thread_id}"]["get"]["responses"]
+    assert "404" in paths["/threads/{thread_id}"]["delete"]["responses"]
+
+
+async def test_query_routes_retries_and_reports_execution_metadata() -> None:
+    """With the router, judge, and retries on, the response describes the whole run."""
+    chat = ScriptedChatProvider(
+        route='{"route": "retrieve", "standalone_query": "InsightFlow definition"}',
+        answer=["No citation.", "InsightFlow is a RAG platform [1]."],
+        rewrite='{"query": "InsightFlow purpose"}',
+    )
+    retriever = FakeRetriever([make_candidate()])
+    application = make_app(
+        chat,
+        retriever,
+        agent_router_enabled=True,
+        agent_verifier_llm_enabled=True,
+        agent_max_attempts=2,
+    )
+
+    async with client_for(application) as client:
+        response = await client.post("/query", json={"query": "What is InsightFlow?"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == "InsightFlow is a RAG platform [1]."
+    assert body["verification"] == {"status": "passed", "method": "llm", "issues": []}
+    assert body["metadata"]["attempts"] == 2
+    expected_queries = ["InsightFlow definition", "InsightFlow purpose"]
+    assert body["metadata"]["retrieval_queries"] == expected_queries
+    assert [query.text for query in retriever.queries] == expected_queries
+    assert chat.roles() == ["route", "answer", "rewrite", "answer", "judge"]
+
+
+async def test_query_direct_route_returns_no_sources() -> None:
+    chat = ScriptedChatProvider(route='{"route": "direct", "standalone_query": "hello"}')
+    retriever = FakeRetriever([make_candidate()])
+
+    async with client_for(make_app(chat, retriever, agent_router_enabled=True)) as client:
+        response = await client.post("/query", json={"query": "hello"})
+
+    body = response.json()
+    assert body["answer"] == "Hello! Ask me about the indexed documents."
+    assert body["sources"] == []
+    assert body["metadata"]["route"] == "direct"
+    assert body["verification"] == {"status": "skipped", "method": "none", "issues": []}
+    assert retriever.queries == []
+
+
+async def test_query_creates_a_thread_and_continues_it() -> None:
+    """A new thread identifier is returned, and a follow-up on it sees the history."""
+    chat = ScriptedChatProvider(answer=["First answer [1].", "Second answer [1]."])
+    application = make_app(chat, checkpointer=memory_saver())
+
+    async with client_for(application) as client:
+        first = await client.post("/query", json={"query": "What is InsightFlow?"})
+        thread_id = first.json()["thread_id"]
+        second = await client.post("/query", json={"query": "And why?", "thread_id": thread_id})
+        thread = await client.get(f"/threads/{thread_id}")
+
+    assert isinstance(thread_id, str) and thread_id
+    assert second.json()["thread_id"] == thread_id
+    follow_up_messages = chat.calls_for("answer")[1]
+    assert follow_up_messages[1:3] == [
+        {"role": "user", "content": "What is InsightFlow?"},
+        {"role": "assistant", "content": "First answer [1]."},
+    ]
+    assert thread.status_code == 200
+    assert thread.json() == {
+        "thread_id": thread_id,
+        "turns": [
+            {"query": "What is InsightFlow?", "answer": "First answer [1]."},
+            {"query": "And why?", "answer": "Second answer [1]."},
+        ],
+    }
+
+
+async def test_query_accepts_a_client_chosen_thread_identifier() -> None:
+    application = make_app(ScriptedChatProvider(), checkpointer=memory_saver())
+
+    async with client_for(application) as client:
+        response = await client.post("/query", json={"query": "q", "thread_id": "client-1"})
+
+    assert response.json()["thread_id"] == "client-1"
+
+
+@pytest.mark.parametrize("thread_id", ["", "has space", "x" * 129, "slash/no"])
+async def test_query_rejects_invalid_thread_identifiers(thread_id: str) -> None:
+    async with client_for(make_app(ScriptedChatProvider())) as client:
+        response = await client.post("/query", json={"query": "q", "thread_id": thread_id})
+
+    assert response.status_code == 422
+
+
+async def test_query_without_a_checkpointer_is_stateless() -> None:
+    chat = ScriptedChatProvider()
+
+    async with client_for(make_app(chat)) as client:
+        response = await client.post("/query", json={"query": "q", "thread_id": "ignored"})
+        thread = await client.get("/threads/ignored")
+
+    assert response.json()["thread_id"] is None
+    assert thread.status_code == 404
+
+
+async def test_thread_endpoints_report_unknown_threads() -> None:
+    async with client_for(make_app(ScriptedChatProvider(), checkpointer=memory_saver())) as client:
+        read = await client.get("/threads/missing")
+        delete = await client.delete("/threads/missing")
+
+    for response in (read, delete):
+        assert response.status_code == 404
+        assert response.json() == {
+            "error": {
+                "code": "thread_not_found",
+                "message": "The conversation thread does not exist.",
+            }
+        }
+
+
+async def test_thread_can_be_deleted() -> None:
+    application = make_app(ScriptedChatProvider(), checkpointer=memory_saver())
+
+    async with client_for(application) as client:
+        await client.post("/query", json={"query": "q", "thread_id": "t1"})
+        deleted = await client.delete("/threads/t1")
+        read = await client.get("/threads/t1")
+
+    assert deleted.status_code == 204
+    assert read.status_code == 404

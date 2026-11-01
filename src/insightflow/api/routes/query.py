@@ -1,69 +1,129 @@
-"""Query endpoint: the grounded retrieval-augmented answer flow."""
+"""Query endpoints: the routed, verified retrieval-augmented answer workflow."""
+
+import time
+from collections.abc import AsyncIterator
+from typing import Any, cast
 
 from fastapi import APIRouter
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
-from insightflow.agents.graph import build_graph
-from insightflow.agents.nodes.answer import make_answer_node
-from insightflow.agents.nodes.retrieve import make_retrieve_node
-from insightflow.agents.state import AgentState
+from insightflow.agents.state import AgentState, new_turn_input
 from insightflow.api.dependencies import (
     ChatProviderDependency,
+    CheckpointerDependency,
     ContextAssemblerDependency,
     RetrieverDependency,
     SettingsDependency,
 )
-from insightflow.api.schemas import ErrorResponse, QueryRequest, QueryResponse, SourceReference
-from insightflow.rag.models import ContextBudget
+from insightflow.api.errors import describe_error
+from insightflow.api.schemas import ErrorResponse, QueryRequest, QueryResponse
+from insightflow.api.workflow import build_workflow, resolve_thread, to_query_response
+from insightflow.core.exceptions import InsightFlowError
 
 router = APIRouter(tags=["query"])
 
-
-@router.post(
-    "/query",
-    response_model=QueryResponse,
-    responses={
-        429: {"model": ErrorResponse, "description": "The provider is rate limited."},
-        502: {"model": ErrorResponse, "description": "The provider request failed."},
-        503: {
-            "model": ErrorResponse,
-            "description": "The provider is not configured or the document store is unavailable.",
-        },
-        504: {"model": ErrorResponse, "description": "The provider request timed out."},
+ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    429: {"model": ErrorResponse, "description": "The provider is rate limited."},
+    502: {"model": ErrorResponse, "description": "The provider request failed."},
+    503: {
+        "model": ErrorResponse,
+        "description": "The provider is not configured or the document store is unavailable.",
     },
-)
+    504: {"model": ErrorResponse, "description": "The provider request timed out."},
+}
+
+
+def elapsed_ms(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
+
+
+@router.post("/query", response_model=QueryResponse, responses=ERROR_RESPONSES)
 async def query(
     request: QueryRequest,
     chat_provider: ChatProviderDependency,
     retriever: RetrieverDependency,
     assembler: ContextAssemblerDependency,
     settings: SettingsDependency,
+    checkpointer: CheckpointerDependency,
 ) -> QueryResponse:
-    """Retrieve indexed context, answer from it, and return the cited sources."""
-    retrieve_node = make_retrieve_node(
-        retriever,
-        assembler,
-        top_k=settings.rag_candidate_top_k,
-        budget=ContextBudget(
-            max_tokens=settings.rag_context_token_budget,
-            max_chunks=settings.rag_generation_max_chunks,
-        ),
+    """Route the question, retrieve context when needed, answer, verify, and cite sources."""
+    started = time.perf_counter()
+    thread_id, config = resolve_thread(request.thread_id, checkpointer)
+    graph = build_workflow(settings, chat_provider, retriever, assembler, checkpointer)
+
+    result = cast(AgentState, await graph.ainvoke(new_turn_input(request.query), config))
+
+    return to_query_response(result, thread_id=thread_id, duration_ms=elapsed_ms(started))
+
+
+def node_event(node: str, update: AgentState) -> dict[str, Any]:
+    """Summarize one node update for a `node` event without sending internal state."""
+    data: dict[str, Any] = {"node": node}
+    if node == "route" and "route" in update:
+        data["route"] = update["route"]
+    elif node == "retrieve" and update.get("context") is not None:
+        context = update["context"]
+        data["passages"] = len(context.chunks) if context is not None else 0
+    elif node == "verify" and update.get("verification") is not None:
+        verification = update["verification"]
+        data["status"] = verification.status if verification is not None else None
+    elif node == "rewrite" and "attempt" in update:
+        data["attempt"] = update["attempt"]
+    return data
+
+
+@router.post(
+    "/query/stream",
+    response_class=EventSourceResponse,
+    responses={
+        **ERROR_RESPONSES,
+        200: {
+            "description": (
+                "Server-Sent Events: `node` after each workflow step, `attempt` when a retry "
+                "starts (discard earlier tokens), `token` for answer text, then one `final` "
+                "event with the QueryResponse, or one `error` event with an ErrorResponse."
+            ),
+        },
+    },
+)
+async def query_stream(
+    request: QueryRequest,
+    chat_provider: ChatProviderDependency,
+    retriever: RetrieverDependency,
+    assembler: ContextAssemblerDependency,
+    settings: SettingsDependency,
+    checkpointer: CheckpointerDependency,
+) -> AsyncIterator[ServerSentEvent]:
+    """Run the same workflow as POST /query and stream its progress and answer tokens."""
+    started = time.perf_counter()
+    thread_id, config = resolve_thread(request.thread_id, checkpointer)
+    graph = build_workflow(
+        settings, chat_provider, retriever, assembler, checkpointer, stream_tokens=True
     )
-    graph = build_graph(retrieve_node, make_answer_node(chat_provider))
 
-    initial_state: AgentState = {"query": request.query}
-    result = await graph.ainvoke(initial_state)
+    final_state: AgentState = {}
+    try:
+        async for mode, chunk in graph.astream(
+            new_turn_input(request.query),
+            config,
+            stream_mode=["updates", "custom", "values"],
+        ):
+            if mode == "custom":
+                event = cast(dict[str, Any], chunk)
+                yield ServerSentEvent(
+                    event="token", data={"attempt": event["attempt"], "text": event["text"]}
+                )
+            elif mode == "updates":
+                for node, update in cast(dict[str, AgentState], chunk).items():
+                    yield ServerSentEvent(event="node", data=node_event(node, update))
+                    if node == "rewrite":
+                        yield ServerSentEvent(event="attempt", data={"attempt": update["attempt"]})
+            elif mode == "values":
+                final_state = cast(AgentState, chunk)
+    except InsightFlowError as exc:
+        _, detail = describe_error(exc)
+        yield ServerSentEvent(event="error", data={"error": detail})
+        return
 
-    context = result.get("context")
-    sources = [
-        SourceReference(
-            citation=citation,
-            source_identifier=item.source_identifier,
-            source_name=item.source_name,
-            chunk_id=item.chunk.chunk_id,
-            page_start=item.chunk.page_start,
-            page_end=item.chunk.page_end,
-            score=item.score,
-        )
-        for citation, item in enumerate(context.chunks if context else [], start=1)
-    ]
-    return QueryResponse(answer=result.get("answer", ""), sources=sources)
+    response = to_query_response(final_state, thread_id=thread_id, duration_ms=elapsed_ms(started))
+    yield ServerSentEvent(event="final", data=response.model_dump(mode="json"))

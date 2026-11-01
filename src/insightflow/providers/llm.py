@@ -1,6 +1,7 @@
 """Provider-independent chat contract backed by LiteLLM."""
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import contextmanager
 from typing import Any, Protocol
 
 from litellm import acompletion, get_llm_provider
@@ -71,32 +72,12 @@ class LiteLLMChatProvider:
         return options
 
     async def complete(self, messages: Sequence[ChatMessage]) -> str:
-        try:
+        with translate_provider_errors():
             response = await acompletion(
                 model=self._model,
                 messages=list(messages),
                 **self._request_options(),
             )
-        except Timeout as exc:
-            raise ProviderTimeoutError from exc
-        except RateLimitError as exc:
-            raise ProviderRateLimitError from exc
-        except (
-            AuthenticationError,
-            BadRequestError,
-            NotFoundError,
-            PermissionDeniedError,
-        ) as exc:
-            raise ProviderConfigurationError from exc
-        except (
-            APIConnectionError,
-            APIError,
-            APIResponseValidationError,
-            InternalServerError,
-            ServiceUnavailableError,
-            UnprocessableEntityError,
-        ) as exc:
-            raise ProviderError from exc
 
         try:
             content = response.choices[0].message.content
@@ -107,13 +88,50 @@ class LiteLLMChatProvider:
         return content
 
     async def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[str]:
-        response = await acompletion(
-            model=self._model,
-            messages=list(messages),
-            stream=True,
-            **self._request_options(),
-        )
-        async for chunk in response:
-            content = chunk.choices[0].delta.content
-            if isinstance(content, str) and content:
-                yield content
+        with translate_provider_errors():
+            response = await acompletion(
+                model=self._model,
+                messages=list(messages),
+                stream=True,
+                **self._request_options(),
+            )
+            async for chunk in response:
+                content = _delta_content(chunk)
+                if content:
+                    yield content
+
+
+@contextmanager
+def translate_provider_errors() -> Iterator[None]:
+    """Replace LiteLLM exceptions with sanitized application provider errors."""
+    try:
+        yield
+    except Timeout as exc:
+        raise ProviderTimeoutError from exc
+    except RateLimitError as exc:
+        raise ProviderRateLimitError from exc
+    except (
+        AuthenticationError,
+        BadRequestError,
+        NotFoundError,
+        PermissionDeniedError,
+    ) as exc:
+        raise ProviderConfigurationError from exc
+    except (
+        APIConnectionError,
+        APIError,
+        APIResponseValidationError,
+        InternalServerError,
+        ServiceUnavailableError,
+        UnprocessableEntityError,
+    ) as exc:
+        raise ProviderError from exc
+
+
+def _delta_content(chunk: Any) -> str | None:
+    """Return a stream chunk's text; usage-only chunks without choices give None."""
+    try:
+        content = chunk.choices[0].delta.content
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return None
+    return content if isinstance(content, str) else None

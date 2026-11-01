@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     rag_candidate_top_k: int = Field(default=12, ge=1, le=100)
     rag_generation_max_chunks: int = Field(default=6, ge=1)
     rag_context_token_budget: int = Field(default=6000, ge=1)
+    agent_router_enabled: bool = True
+    agent_verifier_llm_enabled: bool = True
+    agent_max_attempts: int = Field(default=2, ge=1, le=4)
+    agent_history_turns: int = Field(default=6, ge=0, le=50)
+    checkpoint_backend: Literal["none", "memory", "sqlite"] = "sqlite"
+    checkpoint_sqlite_path: Path = Path("data/checkpoints.sqlite")
 
     @model_validator(mode="after")
     def validate_rag_token_limits(self) -> Self:
