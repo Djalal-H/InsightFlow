@@ -2,8 +2,8 @@
 
 ## Current status
 
-- Current stage: Stage 3 (implementation complete; hosted-model run pending)
-- Last updated: 2026-10-26
+- Current stage: Stage 3 (implementation complete; in review as PR #7)
+- Last updated: 2026-10-29
 - Overall state: in progress
 
 ## Stage summary
@@ -12,7 +12,7 @@
 | ------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
 | Stage 1 | in progress | Repository foundation is present, but tests, runtime dependency pins, and mypy validation remain incomplete |
 | Stage 2 | complete    | Query workflow, provider validation and error mapping, and mocked contract coverage verified                |
-| Stage 3 | complete (mocked models) | Ingestion, Qdrant persistence, dense retrieval, and grounded answers with sources verified; restart persistence verified on a real Qdrant server with fake embeddings; no hosted-model run |
+| Stage 3 | complete | Ingestion, Qdrant persistence, dense retrieval, and grounded answers with sources verified with mocks and on a real Qdrant server; a hosted-model run on `corpus/MD` was reported working by the author (2026-10-29) |
 | Stage 4 | not started | —                                                                                                          |
 | Stage 5 | not started | —                                                                                                          |
 | Stage 6 | not started | —                                                                                                          |
@@ -136,7 +136,7 @@
 - Remaining:
   - Chunk embedding, Qdrant collection creation and persistence, `skipped` handling for unchanged versions, an ingestion CLI, retrieval, and grounded generation.
   - `create_default_parsers` is not covered by tests, and no real-corpus run was made.
-- Commit: `uncommitted`
+- Commit: `1bb0078` (PR #7)
 
 ### 2026-10-26 — Chunk embedding, Qdrant persistence, version skipping, and ingestion CLI
 
@@ -166,7 +166,7 @@
   - Documents removed from the corpus are not deleted from Qdrant.
   - Chunk token counts are not checked against `EMBEDDING_MAX_INPUT_TOKENS`.
   - Dense retrieval, grounded generation, and structured answers with sources.
-- Commit: `uncommitted`
+- Commit: `1bb0078` (PR #7)
 
 ### 2026-10-26 — Dense retrieval, grounded answers, and persistence verification
 
@@ -193,7 +193,30 @@
   - `sources` lists every passage given to the model, numbered to match `[n]` citations; answers are not parsed to filter cited passages.
   - Language and date filters in `RetrievalQuery` raise `ValueError` because stored payloads do not carry those fields.
 - Remaining:
-  - No run with a hosted embedding or chat model, and no ingestion of the real `corpus/` (deferred by request).
+  - No ingestion of the full `corpus/` (PDF, DOCX, TXT). See the 2026-10-29 entry for the hosted-model run on `corpus/MD`.
   - Ingestion retries (`max_retries`), deletion of documents removed from the corpus, and chunk-size checks against `EMBEDDING_MAX_INPUT_TOKENS` are not implemented.
   - Stage 1 still lacks pinned versions for several runtime dependencies.
+- Commit: `1bb0078` (PR #7)
+
+### 2026-10-29 — Hosted-model check with NVIDIA NIM
+
+- Stage: Stage 3
+- Status: completed
+- Scope: Verified the chat and embedding settings against NVIDIA NIM, then the author ran ingestion and a query end to end.
+- Changed:
+  - No code changes. Configuration only, in the untracked `.env`.
+- Validation:
+  - A diagnostic script outside the repository sent one chat request and two embedding requests with the `.env` settings. Its output was reviewed in the session:
+    - `LITELLM_CHAT_MODEL=nvidia/nemotron-3.5-bolt-e4b` — failed: `BadRequestError` "LLM Provider NOT provided"; the API returned 503 `provider_configuration_error`.
+    - `LITELLM_CHAT_MODEL=nvidia_nim/nemotron-3.5-bolt-e4b` — failed: `NotFoundError` 404.
+    - `LITELLM_CHAT_MODEL=nvidia_nim/nvidia/nemotron-3.5-bolt-e4b` — passed.
+    - `LITELLM_EMBEDDING_MODEL=nvidia_nim/nvidia/nemotron-3-embed-1b` — passed with and without `input_type=query`; vector size 2048.
+  - Ingestion of `corpus/MD` into the `insightflow_trial` collection and `POST /query` — reported working by the author; the command output was not recorded here.
+- Decisions:
+  - NVIDIA NIM models need the `nvidia_nim/` LiteLLM prefix followed by the full model ID, for example `nvidia_nim/nvidia/<model>`.
+  - `EMBEDDING_DIMENSIONS=2048` for `nemotron-3-embed-1b`.
+- Remaining:
+  - The chat-provider startup check accepts `nvidia/<model>` because LiteLLM infers the provider from the base URL, but the request then fails. A stricter check that requires an explicit provider prefix is not implemented.
+  - Chat and embeddings share `LITELLM_API_KEY` and `LITELLM_API_BASE`; a separate embedding provider needs new settings.
+  - Embedding requests do not send `input_type` (`passage` for documents, `query` for questions), which NVIDIA retrieval models can use.
 - Commit: `uncommitted`
