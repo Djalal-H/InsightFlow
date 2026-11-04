@@ -86,6 +86,18 @@ and `get_checkpointer`; without these overrides the route opens a real Qdrant cl
 `Settings(_env_file=None)` still sees `.env` values: pass values explicitly when a test depends
 on them.
 
+### Tools (Stage 5, in progress)
+
+`tools/protocols.py:ToolClient` is the boundary for agent nodes; `tools/mcp_client.py:McpToolClient`
+is the only MCP client code (`mcp` 2.x: `Client` and `MCPServer`; `FastMCP` was renamed).
+`call_tool` never raises: allowlist, input-schema (jsonschema), timeout, server, and transport
+failures become a `ToolResult` with an error code; oversized output is cut and marked `truncated`.
+`list_tools` raises `ToolError`/`ToolTimeoutError`, and its result is cached per client instance. Each operation opens and closes its own MCP connection.
+`tools/calculator_server.py` is an in-repo MCP server (tool `calculate`) over the `ast`-based
+evaluator in `tools/calculator.py`. Tests connect to `MCPServer` instances in-process; one
+integration test runs the server over stdio. `MCPServer()` calls `logging.basicConfig`, so
+configure app logging before building an in-process server. The workflow does not call tools yet.
+
 ### Other layers
 
 - `providers/`: `ChatProvider` / `EmbeddingProvider` protocols with LiteLLM adapters.

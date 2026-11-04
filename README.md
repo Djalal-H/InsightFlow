@@ -77,10 +77,11 @@ QDRANT_TEST_URL=http://localhost:6333 pytest -m qdrant
 - `providers`: provider-independent chat and embedding contracts with LiteLLM adapters
 - `rag`: ingestion and retrieval domain boundaries
 - `storage`: Qdrant access
+- `tools`: tool contracts, the MCP client adapter, and InsightFlow's own MCP servers
 - `core`: configuration, logging, and shared errors
 
-Document parsers, MCP integrations, authentication, observability services, and full application
-containerization are intentionally deferred until their milestones begin.
+Authentication, observability services, and full application containerization are intentionally
+deferred until their milestones begin.
 
 ## Max-Min semantic chunking
 
@@ -238,3 +239,29 @@ curl -N localhost:8000/query/stream -H 'content-type: application/json' \
 
 Request validation and configuration errors that occur before the stream starts return normal
 HTTP errors. After the stream starts, the status is 200 and a failure is sent as one `error` event.
+
+## MCP tools (Stage 5, in progress)
+
+`insightflow.tools.mcp_client.McpToolClient` implements the `ToolClient` contract for one MCP
+server with the official MCP SDK (`mcp==2.3.0`). It connects to an in-process server, a stdio
+subprocess, or a URL. Each call:
+
+- is refused when the tool is not on the client's allowlist or not offered by the server;
+- has its arguments checked against the tool's input schema before it is sent;
+- stops after `timeout_seconds`;
+- has its text output limited to `max_output_chars` (`truncated` is set when it is cut);
+- returns a `ToolResult` with a call ID, start time, duration, and a stable error code
+  (`unknown_tool`, `invalid_arguments`, `tool_failed`, `timeout`, `unavailable`). Failures are
+  results, not exceptions, and do not include transport or server exception text.
+
+The first tool is a calculator (`insightflow.tools.calculator_server`, tool `calculate`). It
+parses arithmetic with `ast` and evaluates only allow-listed operators, functions (`abs`, `round`,
+`min`, `max`, `sqrt`, `floor`, `ceil`, `log`, `log10`, `exp`), and constants (`pi`, `e`). It
+never uses `eval`, and it limits expression length and result size. Other MCP clients can run it
+over stdio:
+
+```bash
+PYTHONPATH=src python -m insightflow.tools.calculator_server
+```
+
+The workflow does not call tools yet; router and graph integration is the next Stage 5 step.

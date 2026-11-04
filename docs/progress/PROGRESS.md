@@ -2,8 +2,8 @@
 
 ## Current status
 
-- Current stage: Stage 4 (implemented on `feature/stage4-agent-workflow`; verified with mocks only)
-- Last updated: 2026-11-01
+- Current stage: Stage 5 (MCP client boundary and calculator server on `feature/stage5-mcp-tools`; not wired into the workflow)
+- Last updated: 2026-11-04
 - Overall state: in progress
 
 ## Stage summary
@@ -14,7 +14,7 @@
 | Stage 2 | complete    | Query workflow, provider validation and error mapping, and mocked contract coverage verified                |
 | Stage 3 | complete | Ingestion, Qdrant persistence, dense retrieval, and grounded answers with sources verified with mocks and on a real Qdrant server; a hosted-model run on `corpus/MD` was reported working by the author (2026-10-29) |
 | Stage 4 | in progress | Router, verifier, bounded retries, execution metadata, SQLite checkpointer with threads, and SSE streaming verified with mocks; no hosted-model run yet |
-| Stage 5 | not started | —                                                                                                          |
+| Stage 5 | in progress | MCP client adapter with allowlist, input-schema, timeout, and output-size controls, and a calculator MCP server, verified in-process and over stdio; no graph integration or web search yet |
 | Stage 6 | not started | —                                                                                                          |
 | Stage 7 | not started | —                                                                                                          |
 | Stage 8 | not started | —                                                                                                          |
@@ -254,3 +254,36 @@
   - Threads have no owner and no expiry; authentication is Stage 8 work.
   - Parallel retrieval for decomposed queries and human approval (optional Stage 4 work) are not implemented.
 - Commit: `eef4a6f`
+
+### 2026-11-04 — Stage 5 MCP client boundary and calculator server
+
+- Stage: Stage 5
+- Status: partial (steps 1–3 of 6: branch, MCP client boundary, calculator server)
+- Scope: Added the official MCP SDK, a provider-neutral `ToolClient` contract with an MCP adapter that applies the per-call controls from the plan, and an in-repo calculator MCP server. The workflow does not call tools yet.
+- Changed:
+  - `src/insightflow/tools/models.py`, `protocols.py` — `ToolSpec`, `ToolResult` (call ID, server, tool, arguments, status, stable error code, output, structured output, `truncated`, start time, duration), and the `ToolClient` protocol.
+  - `src/insightflow/tools/mcp_client.py` — `McpToolClient` for an in-process server, a stdio subprocess, a transport, or a URL. Allowlist; argument check against the tool's input schema before the call (`jsonschema`); one timeout for each list or call operation; text output limit and dropping of oversized structured output; failures returned as `ToolResult` codes (`unknown_tool`, `invalid_arguments`, `tool_failed`, `timeout`, `unavailable`) without server or transport exception text. The tool list is cached per client; each operation opens its own connection. Logs record only server, tool, status, error code, and duration.
+  - `src/insightflow/tools/calculator.py`, `calculator_server.py` — `ast`-based evaluator (no `eval`) with allow-listed operators, functions, and constants, an expression limit of 200 characters, an integer exponent limit, and a result limit of 10^100; MCP server `insightflow-calculator` with the read-only tool `calculate`, runnable over stdio.
+  - `src/insightflow/core/exceptions.py` — `ToolError`, `ToolTimeoutError` (raised only by `list_tools`).
+  - `requirements.txt` — adds `mcp==2.3.0` (released 2026-10-02) and `jsonschema` (imported directly; already a dependency of `mcp`). `requirements-dev.txt` — adds `types-jsonschema`.
+  - `README.md`, `CLAUDE.md`, `docs/Implement Plan Draft.md` — tools layer, calculator usage, and the selected Stage 5 tools.
+  - Tests: new `tests/unit/test_calculator.py`, `tests/unit/test_mcp_tool_client.py` (in-process `MCPServer` instances and failing or hanging fake transports), `tests/integration/test_calculator_stdio.py` (real subprocess over stdio).
+- Validation:
+  - `uv pip install --python .venv/bin/python "mcp==2.3.0"` — installed `mcp` 2.3.0, `mcp-types` 2.3.0, `httpx2` 2.16.0, `httpcore2` 2.16.0, `pyjwt` 2.15.1, `cryptography` 50.0.2, `cffi` 2.1.1, `pycparser` 3.12, `opentelemetry-api` 1.45.2, `python-multipart` 0.0.33, `sse-starlette` 3.6.0, `truststore` 0.10.5.
+  - `uv pip install --python .venv/bin/python types-jsonschema` — installed `types-jsonschema` 4.26.0.20261006.
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues in 55 source files
+  - `pytest -p no:cacheprovider -q` — passed: 292 passed, 1 skipped (the `qdrant` test without `QDRANT_TEST_URL`); coverage 93%; `tools/` modules at 90–100% (`mcp_client.py` 98%, `calculator.py` 97%).
+  - `git diff --check` — passed
+- Decisions:
+  - InsightFlow is an MCP client. Exposing InsightFlow as an MCP server is out of scope.
+  - `call_tool` returns failures as results so that the workflow can record the attempt and let the model explain it; `list_tools` raises, so that a node can skip the tool route when a server is unusable.
+  - Arguments are validated on the client side: the MCP 2.x client validates tool output but not input, and the server's own validation error contains raw pydantic text.
+  - The MCP client response cache is disabled; the adapter caches the tool list itself, and tool results are never cached.
+  - A server error from a tool (`is_error`) is passed to the model as a length-limited message (for example "division by zero"); unexpected server exceptions reach the client only as a generic message from the SDK.
+  - Prompt-injection controls for web results are Stage 8 work, by the author's decision.
+- Remaining:
+  - Step 4: settings (enable flag, timeout, output limit), dependency wiring, a `tool` route in the router, a tool node, tool results in the answer prompt and execution metadata, and routing and termination tests.
+  - Step 4 must configure application logging before an in-process `MCPServer` is created: `MCPServer()` calls `logging.basicConfig`, and the app does not configure the root logger now, so the SDK would install its Rich handler.
+  - Step 5: Tavily web search through its hosted MCP endpoint, a web source type with URLs, and an opt-in real-call test.
+  - No hosted-model run for Stage 4 or Stage 5.

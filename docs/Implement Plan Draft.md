@@ -94,6 +94,9 @@ evaluation expose better choices.
 - Enforce input schemas, timeouts, error handling, output-size limits, and audit metadata.
 - Test tool/no-tool routing and graph termination.
 
+Selected tools (2026-11-04): an in-repo calculator MCP server first, then Tavily web search through
+its hosted MCP endpoint. Prompt-injection controls for web results remain Stage 8 work.
+
 ### Optional work
 
 - Tool discovery and dynamic registration.

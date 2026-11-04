@@ -9,3 +9,4 @@ ruff==0.15.21
 mypy==2.3.0
 
 types-Markdown
+types-jsonschema

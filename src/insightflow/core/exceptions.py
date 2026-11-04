@@ -27,6 +27,14 @@ class StorageError(InsightFlowError):
     """A vector-store operation failed."""
 
 
+class ToolError(InsightFlowError):
+    """A tool server could not be reached or listed."""
+
+
+class ToolTimeoutError(ToolError):
+    """A tool server did not respond before its timeout."""
+
+
 class ThreadNotFoundError(InsightFlowError):
     """A conversation thread has no stored checkpoint."""
 
