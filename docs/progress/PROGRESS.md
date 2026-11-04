@@ -287,3 +287,4 @@
   - Step 4 must configure application logging before an in-process `MCPServer` is created: `MCPServer()` calls `logging.basicConfig`, and the app does not configure the root logger now, so the SDK would install its Rich handler.
   - Step 5: Tavily web search through its hosted MCP endpoint, a web source type with URLs, and an opt-in real-call test.
   - No hosted-model run for Stage 4 or Stage 5.
+- Commit: `2a57796`
