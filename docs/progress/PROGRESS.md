@@ -381,7 +381,7 @@
 - Stage: Stage 5
 - Status: completed
 - Scope: Closed Stage 5 by the author's decision. Every core item of the plan has evidence: the MCP SDK (`mcp==2.3.0`), the client boundary (`ToolClient`, `McpToolClient`), one low-risk tool (calculator) before the registry (`ToolSet`), input schemas, timeouts, error codes, output limits, audit metadata (`metadata.steps`, outcome-only log lines), and tests that the graph always stops. The router was replaced by a ReAct loop, so "tool/no-tool routing" is covered by the agent tests for tool, no-tool, and direct answers.
-- Commits: `2a57796` (MCP client boundary and calculator server), `79a30f6` (ReAct workflow and Tavily web search, with the fix for lost web sources), and the commit that holds this entry (tool server cooldown).
+- Commits: `2a57796` (MCP client boundary and calculator server), `79a30f6` (ReAct workflow and Tavily web search, with the fix for lost web sources), and `6852a03` (tool server cooldown and this entry).
 - Validation (2026-11-10, before the closing commit):
   - `ruff check src tests` — passed
   - `mypy src` — passed: no issues in 60 source files

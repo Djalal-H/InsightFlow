@@ -156,7 +156,7 @@ agent ⇄ act          (search_documents, calculate, tavily_search, …)
 2. `act` runs the action and records the observation. `search_documents` is a local tool: it
    embeds the query, searches Qdrant for `RAG_CANDIDATE_TOP_K` chunks, and keeps passages within
    `RAG_GENERATION_MAX_CHUNKS` and `RAG_CONTEXT_TOKEN_BUDGET` per search. Other actions go to the
-   MCP tools (see [MCP tools](#mcp-tools-stage-5-in-progress)). A failed call is an observation,
+   MCP tools (see [MCP tools](#mcp-tools-stage-5)). A failed call is an observation,
    not an error; storage and embedding failures still stop the request.
 3. `answer` writes the answer from the observations and cites sources as `[n]`. Document passages
    and web pages share one numbering per turn, in the order they were first observed. Without
