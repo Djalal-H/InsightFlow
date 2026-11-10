@@ -1,11 +1,15 @@
 """LangGraph construction helpers.
 
-The workflow is::
+The workflow is a ReAct loop with a verified answer::
 
-    START → route ─┬─ direct ───────────────────────────→ answer → finalize → END
-                   └─ retrieve → retrieve → answer → verify ─┬─ finalize → END
-                                    ▲                        │
-                                    └────── rewrite ◄────────┘ (failed, attempts left)
+    START → agent ⇄ act               (search_documents, calculate, tavily_search, ...)
+              │
+              └→ answer ─┬─ verify ─┬─ finalize → END
+                         │          └─ retry → agent   (failed, attempts left)
+                         └─ finalize → END             (no observations: direct reply)
+
+Both loops are bounded. `agent` ⇄ `act` stops after `max_steps` actions per attempt (the agent
+node enforces it, see `agents/nodes/agent.py`), and `retry` runs at most `max_attempts - 1` times.
 """
 
 from collections.abc import Awaitable, Callable
@@ -21,42 +25,51 @@ from insightflow.agents.state import AgentState
 AgentNode = Callable[[AgentState], Awaitable[AgentState]]
 AgentGraph = CompiledStateGraph[AgentState, None, AgentState, AgentState]
 
+NODE_NAMES = ("agent", "act", "answer", "verify", "retry", "finalize")
+
 
 @dataclass(frozen=True)
 class WorkflowNodes:
     """The node implementations wired into the workflow graph."""
 
-    route: AgentNode
-    retrieve: AgentNode
+    agent: AgentNode
+    act: AgentNode
     answer: AgentNode
     verify: AgentNode
-    rewrite: AgentNode
+    retry: AgentNode
     finalize: AgentNode
 
 
-def after_route(state: AgentState) -> Literal["retrieve", "answer"]:
-    """Skip retrieval for questions the router marked as direct."""
-    return "answer" if state.get("route") == "direct" else "retrieve"
+def after_agent(state: AgentState) -> Literal["act", "answer"]:
+    """Run the chosen tool, or answer when the agent chose `answer`."""
+    action = state.get("pending_action")
+    return "answer" if action is None or action.is_answer else "act"
 
 
 def after_answer(state: AgentState) -> Literal["verify", "finalize"]:
-    """Only grounded answers are verified."""
-    return "finalize" if state.get("route") == "direct" else "verify"
+    """Direct replies (no observations) are not verified."""
+    return "verify" if state.get("observations") else "finalize"
 
 
-def make_after_verify(max_attempts: int) -> Callable[[AgentState], Literal["rewrite", "finalize"]]:
+def make_after_verify(max_attempts: int) -> Callable[[AgentState], Literal["retry", "finalize"]]:
     """Retry a failed verification until `max_attempts` answers were produced."""
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
 
-    def after_verify(state: AgentState) -> Literal["rewrite", "finalize"]:
+    def after_verify(state: AgentState) -> Literal["retry", "finalize"]:
         verification = state.get("verification")
         failed = verification is not None and verification.status == "failed"
         if failed and state.get("attempt", 1) < max_attempts:
-            return "rewrite"
+            return "retry"
         return "finalize"
 
     return after_verify
+
+
+def recursion_limit(max_steps: int, max_attempts: int) -> int:
+    """The LangGraph step limit that the bounded loops can never reach, plus a margin."""
+    per_attempt = 2 * max_steps + 3  # agent/act pairs, the final agent, answer, and verify
+    return max_attempts * (per_attempt + 1) + 2  # one retry per attempt, finalize, margin
 
 
 def traced(name: str, node: AgentNode) -> AgentNode:
@@ -76,15 +89,15 @@ def build_graph(
     max_attempts: int = 1,
     checkpointer: BaseCheckpointSaver[str] | None = None,
 ) -> AgentGraph:
-    """Build the routed, verified answer workflow."""
+    """Build the ReAct workflow with verification and bounded retries."""
     graph = StateGraph(AgentState)
-    for name in ("route", "retrieve", "answer", "verify", "rewrite", "finalize"):
+    for name in NODE_NAMES:
         graph.add_node(name, traced(name, getattr(nodes, name)))  # type: ignore[call-overload]
-    graph.add_edge(START, "route")
-    graph.add_conditional_edges("route", after_route)
-    graph.add_edge("retrieve", "answer")
+    graph.add_edge(START, "agent")
+    graph.add_conditional_edges("agent", after_agent)
+    graph.add_edge("act", "agent")
     graph.add_conditional_edges("answer", after_answer)
     graph.add_conditional_edges("verify", make_after_verify(max_attempts))
-    graph.add_edge("rewrite", "retrieve")
+    graph.add_edge("retry", "agent")
     graph.add_edge("finalize", END)
     return graph.compile(checkpointer=checkpointer)

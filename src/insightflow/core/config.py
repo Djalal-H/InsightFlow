@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,12 +49,20 @@ class Settings(BaseSettings):
     rag_candidate_top_k: int = Field(default=12, ge=1, le=100)
     rag_generation_max_chunks: int = Field(default=6, ge=1)
     rag_context_token_budget: int = Field(default=6000, ge=1)
-    agent_router_enabled: bool = True
     agent_verifier_llm_enabled: bool = True
     agent_max_attempts: int = Field(default=2, ge=1, le=4)
     agent_history_turns: int = Field(default=6, ge=0, le=50)
     checkpoint_backend: Literal["none", "memory", "sqlite"] = "sqlite"
     checkpoint_sqlite_path: Path = Path("data/checkpoints.sqlite")
+    agent_max_steps: int = Field(default=4, ge=1, le=8)
+    tool_calculator_enabled: bool = True
+    tool_web_search_enabled: bool = False
+    tool_timeout_seconds: float = Field(default=20.0, gt=0.0, le=120.0)
+    tool_max_output_chars: int = Field(default=6000, ge=200, le=50_000)
+    tool_failure_cooldown_seconds: float = Field(default=60.0, ge=0.0, le=3600.0)
+    tavily_api_key: SecretStr | None = None
+    tavily_mcp_url: str = "https://mcp.tavily.com/mcp/"
+    web_search_max_results: int = Field(default=5, ge=1, le=20)
 
     @model_validator(mode="after")
     def validate_rag_token_limits(self) -> Self:
@@ -74,6 +82,10 @@ class Settings(BaseSettings):
             and self.rag_chunk_overlap_tokens != 0
         ):
             raise ValueError("semantic_max_min does not support token overlap")
+        if self.tool_web_search_enabled and not (
+            self.tavily_api_key and self.tavily_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("TOOL_WEB_SEARCH_ENABLED requires TAVILY_API_KEY")
         return self
 
 

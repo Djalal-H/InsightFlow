@@ -13,16 +13,21 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import BaseModel
 
-from insightflow.agents.models import ConversationTurn, VerificationResult
-from insightflow.rag.models import AssembledContext
+from insightflow.agents.models import (
+    AgentAction,
+    ConversationTurn,
+    Observation,
+    VerificationResult,
+)
 
 CheckpointBackend = Literal["none", "memory", "sqlite"]
 
 # Pydantic types stored at the top level of the workflow state. Nested models are rebuilt by
 # Pydantic validation, so only these need to be allowed.
 CHECKPOINT_STATE_TYPES: tuple[type[BaseModel], ...] = (
-    AssembledContext,
+    AgentAction,
     ConversationTurn,
+    Observation,
     VerificationResult,
 )
 

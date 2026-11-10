@@ -2,30 +2,34 @@
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import AsyncIterator, Sequence
+import uuid
+from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
 
+from insightflow.agents.nodes.agent import AGENT_SYSTEM_PROMPT
 from insightflow.agents.nodes.answer import DIRECT_SYSTEM_PROMPT, GROUNDED_SYSTEM_PROMPT
-from insightflow.agents.nodes.rewrite import REWRITE_SYSTEM_PROMPT
-from insightflow.agents.nodes.route import ROUTER_SYSTEM_PROMPT
 from insightflow.agents.nodes.verify import JUDGE_SYSTEM_PROMPT
+from insightflow.core.exceptions import ToolError
 from insightflow.providers.llm import ChatMessage
 from insightflow.rag.models import Chunk, RetrievalQuery, RetrievedChunk
+from insightflow.tools.models import ToolErrorCode, ToolResult, ToolSpec
 
 ROLE_BY_SYSTEM_PROMPT = {
-    ROUTER_SYSTEM_PROMPT: "route",
+    AGENT_SYSTEM_PROMPT: "agent",
     GROUNDED_SYSTEM_PROMPT: "answer",
     DIRECT_SYSTEM_PROMPT: "direct",
     JUDGE_SYSTEM_PROMPT: "judge",
-    REWRITE_SYSTEM_PROMPT: "rewrite",
 }
 DEFAULT_REPLIES: dict[str, str] = {
-    # An unparseable router reply makes the route node fall back to retrieval as written.
-    "route": "not json",
+    # An unparseable agent reply makes the agent search the question as written once and then
+    # answer, so a test that scripts nothing runs: agent, act, agent, answer, verify, finalize.
+    "agent": "not json",
     "answer": "Grounded answer [1].",
     "direct": "Hello! Ask me about the indexed documents.",
     "judge": '{"grounded": true, "unsupported_claims": []}',
-    "rewrite": '{"query": "rewritten query"}',
 }
 
 Reply = str | Exception
@@ -122,3 +126,83 @@ def make_candidate(
 
 def word_count(text: str) -> int:
     return len(text.split())
+
+
+TAVILY_TEXT = """Detailed Results:
+
+Title: FastAPI release notes
+URL: https://fastapi.tiangolo.com/release-notes/
+Content: FastAPI 0.130 adds native SSE.
+
+Title: Pydantic changelog
+URL: https://docs.pydantic.dev/latest/changelog/
+Content: Pydantic 2.13 was released.
+It improves validation speed."""
+
+
+class FakeToolClient:
+    """A `ToolClient` with fixed tools and replies; records every call.
+
+    `replies` maps a tool name to its output text. Without a reply, a tool echoes its arguments.
+    `list_error` makes every listing raise; `call_error` makes every call fail with that code.
+    """
+
+    def __init__(
+        self,
+        server_name: str = "fake",
+        tools: Sequence[str] = ("search",),
+        *,
+        replies: Mapping[str, str] | None = None,
+        list_error: ToolError | None = None,
+        call_error: ToolErrorCode | None = None,
+    ) -> None:
+        self._server_name = server_name
+        self.specs = [
+            ToolSpec(
+                name=name,
+                description=f"The {name} tool.",
+                input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+            )
+            for name in tools
+        ]
+        self.replies = dict(replies or {})
+        self.list_error = list_error
+        self.call_error = call_error
+        self.list_calls = 0
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    @property
+    def server_name(self) -> str:
+        return self._server_name
+
+    async def list_tools(self) -> Sequence[ToolSpec]:
+        self.list_calls += 1
+        if self.list_error is not None:
+            raise self.list_error
+        return self.specs
+
+    async def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolResult:
+        self.calls.append((name, dict(arguments)))
+        return ToolResult(
+            call_id=uuid.uuid4().hex,
+            server=self._server_name,
+            tool=name,
+            arguments=dict(arguments),
+            status="ok" if self.call_error is None else "error",
+            error=self.call_error,
+            output=self.replies.get(name, repr(sorted(arguments.items()))),
+            started_at=datetime.now(UTC),
+            duration_ms=1.0,
+        )
+
+
+def action(tool: str, **arguments: Any) -> str:
+    """An agent reply that calls `tool`."""
+    return json.dumps({"thought": f"Use {tool}.", "action": tool, "arguments": arguments})
+
+
+def search(query: str) -> str:
+    return action("search_documents", query=query)
+
+
+ANSWER = '{"thought": "Enough.", "action": "answer"}'

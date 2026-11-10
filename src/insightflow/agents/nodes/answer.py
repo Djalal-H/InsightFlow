@@ -1,18 +1,20 @@
-"""Answer node: produces a grounded or direct response using an injected chat provider."""
+"""Answer node: writes the final answer from the agent's observations, or a direct reply."""
 
 from collections.abc import Sequence
 
 from langgraph.config import get_stream_writer
 
 from insightflow.agents.graph import AgentNode
+from insightflow.agents.observations import has_evidence, render_observations
 from insightflow.agents.state import AgentState, history_messages
 from insightflow.providers.llm import ChatMessage, ChatProvider
 
 NO_CONTEXT_ANSWER = "I could not find relevant information in the indexed documents."
 GROUNDED_SYSTEM_PROMPT = (
-    "Answer the question using only the numbered context passages. "
-    "Cite every passage you use by its number in square brackets, for example [1]. "
-    "If the passages do not contain the answer, say that you do not know."
+    "Answer the question using only the observations: numbered sources and tool results. "
+    "Cite every source you use by its number in square brackets, for example [1]. "
+    "Give calculated values exactly as the tool returned them. "
+    "If the observations do not contain the answer, say that you do not know."
 )
 DIRECT_SYSTEM_PROMPT = (
     "You are InsightFlow, an assistant that answers questions from indexed documents. "
@@ -47,8 +49,9 @@ def make_answer_node(
         query = state["query"]
         attempt = state.get("attempt", 1)
         history = history_messages(state, history_turns)
+        observations = state.get("observations", [])
 
-        if state.get("route") == "direct":
+        if not observations:
             messages: list[ChatMessage] = [
                 {"role": "system", "content": DIRECT_SYSTEM_PROMPT},
                 *history,
@@ -56,8 +59,7 @@ def make_answer_node(
             ]
             return {"answer": await generate(messages, attempt)}
 
-        context = state.get("context")
-        if context is None or not context.chunks:
+        if not has_evidence(observations):
             if stream_tokens:
                 get_stream_writer()(
                     {"type": "token", "attempt": attempt, "text": NO_CONTEXT_ANSWER}
@@ -69,7 +71,8 @@ def make_answer_node(
             *history,
             {
                 "role": "user",
-                "content": f"Context:\n{context.rendered}\n\nQuestion: {query}",
+                "content": f"Observations:\n{render_observations(observations)}\n\n"
+                f"Question: {query}",
             },
         ]
         return {"answer": await generate(messages, attempt)}

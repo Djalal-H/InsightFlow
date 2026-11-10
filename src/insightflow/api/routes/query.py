@@ -14,6 +14,7 @@ from insightflow.api.dependencies import (
     ContextAssemblerDependency,
     RetrieverDependency,
     SettingsDependency,
+    ToolSetDependency,
 )
 from insightflow.api.errors import describe_error
 from insightflow.api.schemas import ErrorResponse, QueryRequest, QueryResponse
@@ -45,11 +46,14 @@ async def query(
     assembler: ContextAssemblerDependency,
     settings: SettingsDependency,
     checkpointer: CheckpointerDependency,
+    tools: ToolSetDependency,
 ) -> QueryResponse:
-    """Route the question, retrieve context when needed, answer, verify, and cite sources."""
+    """Let the agent search documents and call tools, then answer, verify, and cite sources."""
     started = time.perf_counter()
-    thread_id, config = resolve_thread(request.thread_id, checkpointer)
-    graph = build_workflow(settings, chat_provider, retriever, assembler, checkpointer)
+    thread_id, config = resolve_thread(request.thread_id, checkpointer, settings)
+    graph = build_workflow(
+        settings, chat_provider, retriever, assembler, checkpointer, tools=tools
+    )
 
     result = cast(AgentState, await graph.ainvoke(new_turn_input(request.query), config))
 
@@ -59,15 +63,17 @@ async def query(
 def node_event(node: str, update: AgentState) -> dict[str, Any]:
     """Summarize one node update for a `node` event without sending internal state."""
     data: dict[str, Any] = {"node": node}
-    if node == "route" and "route" in update:
-        data["route"] = update["route"]
-    elif node == "retrieve" and update.get("context") is not None:
-        context = update["context"]
-        data["passages"] = len(context.chunks) if context is not None else 0
+    if node == "agent" and update.get("pending_action") is not None:
+        action = update["pending_action"]
+        data["action"] = action.action if action is not None else None
+    elif node == "act" and update.get("observations"):
+        observation = update["observations"][-1]
+        data["tool"] = observation.result.tool
+        data["status"] = observation.result.status
     elif node == "verify" and update.get("verification") is not None:
         verification = update["verification"]
         data["status"] = verification.status if verification is not None else None
-    elif node == "rewrite" and "attempt" in update:
+    elif node == "retry" and "attempt" in update:
         data["attempt"] = update["attempt"]
     return data
 
@@ -93,12 +99,19 @@ async def query_stream(
     assembler: ContextAssemblerDependency,
     settings: SettingsDependency,
     checkpointer: CheckpointerDependency,
+    tools: ToolSetDependency,
 ) -> AsyncIterator[ServerSentEvent]:
     """Run the same workflow as POST /query and stream its progress and answer tokens."""
     started = time.perf_counter()
-    thread_id, config = resolve_thread(request.thread_id, checkpointer)
+    thread_id, config = resolve_thread(request.thread_id, checkpointer, settings)
     graph = build_workflow(
-        settings, chat_provider, retriever, assembler, checkpointer, stream_tokens=True
+        settings,
+        chat_provider,
+        retriever,
+        assembler,
+        checkpointer,
+        tools=tools,
+        stream_tokens=True,
     )
 
     final_state: AgentState = {}
@@ -116,7 +129,7 @@ async def query_stream(
             elif mode == "updates":
                 for node, update in cast(dict[str, AgentState], chunk).items():
                     yield ServerSentEvent(event="node", data=node_event(node, update))
-                    if node == "rewrite":
+                    if node == "retry":
                         yield ServerSentEvent(event="attempt", data={"attempt": update["attempt"]})
             elif mode == "values":
                 final_state = cast(AgentState, chunk)
