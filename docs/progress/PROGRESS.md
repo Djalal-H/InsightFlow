@@ -2,8 +2,8 @@
 
 ## Current status
 
-- Current stage: Stage 5 (ReAct agent with document search, calculator, and Tavily web search on `feature/stage5-mcp-tools`; verified with mocks and in-process servers only)
-- Last updated: 2026-11-04
+- Current stage: Stage 5 complete on `feature/stage5-mcp-tools` (ReAct agent with document search, calculator, and Tavily web search; verified with mocks, in-process servers, the real Tavily server, and the hosted model); Stage 6 not started
+- Last updated: 2026-11-10
 - Overall state: in progress
 
 ## Stage summary
@@ -14,7 +14,7 @@
 | Stage 2 | complete    | Query workflow, provider validation and error mapping, and mocked contract coverage verified                |
 | Stage 3 | complete | Ingestion, Qdrant persistence, dense retrieval, and grounded answers with sources verified with mocks and on a real Qdrant server; a hosted-model run on `corpus/MD` was reported working by the author (2026-10-29) |
 | Stage 4 | in progress | Router, verifier, bounded retries, execution metadata, SQLite checkpointer with threads, and SSE streaming verified with mocks; no hosted-model run yet |
-| Stage 5 | in progress | MCP client adapter with per-call controls, calculator MCP server, ReAct agent loop with document search as a tool, and Tavily web search with web sources, verified with mocks and in-process servers; no real Tavily call and no hosted-model run yet |
+| Stage 5 | complete | MCP client adapter with per-call controls, calculator MCP server, ReAct agent loop with document search as a tool, Tavily web search with web sources, and a tool server cooldown, verified with mocks and in-process servers; the opt-in Tavily test and three hosted-model queries passed (2026-11-10) |
 | Stage 6 | not started | —                                                                                                          |
 | Stage 7 | not started | —                                                                                                          |
 | Stage 8 | not started | —                                                                                                          |
@@ -356,3 +356,42 @@
   - In the mixed question, the agent did not call `calculate` for the version count; the answer said that it did not know.
   - The answers gave 0.162.0 as the newest version, but one search result in the same session showed 0.162.2 on the GitHub releases page. The judge checks that claims are supported by the sources, not that the sources are current.
 - Remaining: commit; decide whether the agent prompt needs a stronger rule to calculate with numbers from observations.
+
+### 2026-11-10 — Stage 5 tool server cooldown
+
+- Stage: Stage 5
+- Status: partial (implemented and tested; not committed)
+- Scope: A tool server that is down no longer costs a timeout on each agent step. Before, `ToolSet.list_tools` tried a failed server again on every step, and each try could take up to `TOOL_TIMEOUT_SECONDS` (20 s by default, so up to 80 s for 4 steps).
+- Changed:
+  - `src/insightflow/tools/registry.py` — `ToolSet(failure_cooldown_seconds=60, clock=time.monotonic)`. A failed listing, or a call that fails with `timeout` or `unavailable` (`PAUSING_ERRORS`), pauses the server. While paused, the catalog leaves it out and its calls return `unavailable` with `PAUSED_MESSAGE` and no connection. The first listing after the cooldown tries the server again; a successful listing ends the pause. `tool_failed` and `invalid_arguments` do not pause. 0 turns pauses off. Log line: `tool server paused server=... reason=... cooldown_s=...`.
+  - `src/insightflow/core/config.py`, `.env.example`, `src/insightflow/api/dependencies.py` — `TOOL_FAILURE_COOLDOWN_SECONDS` (default 60, 0–3600) is passed to the tool set.
+  - `README.md`, `CLAUDE.md` — the pause behavior.
+  - Tests: `tests/fakes.py` (`FakeToolClient.call_error` and `list_calls`); `tests/unit/test_tool_registry.py` (listing pause and retry after the cooldown, pause after `timeout` and `unavailable`, no pause after `tool_failed` and `invalid_arguments`, cooldown 0, negative cooldown, the setting); `tests/integration/test_query_tools_api.py` (two questions with three agent steps each list a failing server once).
+- Validation:
+  - `ruff check src tests` — passed; `mypy src` — passed: no issues in 60 source files
+  - `pytest -q -p no:cacheprovider` — passed: 368 passed, 2 skipped; coverage 94%; `tools/registry.py` 100%
+  - `PYTHONPATH=src python <scratch>/cooldown_check.py` — the real Tavily registration against `http://10.255.255.1/mcp/` (no answer) with a 2 s timeout and four listings: step 1 took 2.01 s and logged the pause; steps 2–4 took 0.00 s. No model or Tavily call.
+- Decisions:
+  - The pause is in `ToolSet`, not in `McpToolClient`: the set sees both failed listings and failed calls after a cached listing, and the app keeps one set for all requests.
+  - One `timeout` pauses the server for all requests. A slow but working server can be hidden for one cooldown; set `TOOL_FAILURE_COOLDOWN_SECONDS=0` to turn this off.
+- Remaining: commit; the calculator rule in the agent prompt; a total context budget across searches.
+
+### 2026-11-10 — Stage 5 closed
+
+- Stage: Stage 5
+- Status: completed
+- Scope: Closed Stage 5 by the author's decision. Every core item of the plan has evidence: the MCP SDK (`mcp==2.3.0`), the client boundary (`ToolClient`, `McpToolClient`), one low-risk tool (calculator) before the registry (`ToolSet`), input schemas, timeouts, error codes, output limits, audit metadata (`metadata.steps`, outcome-only log lines), and tests that the graph always stops. The router was replaced by a ReAct loop, so "tool/no-tool routing" is covered by the agent tests for tool, no-tool, and direct answers.
+- Commits: `2a57796` (MCP client boundary and calculator server), `79a30f6` (ReAct workflow and Tavily web search, with the fix for lost web sources), and the commit that holds this entry (tool server cooldown).
+- Validation (2026-11-10, before the closing commit):
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues in 60 source files
+  - `pytest -q -p no:cacheprovider` — passed: 368 passed, 2 skipped; coverage 94%
+  - `pytest -m tavily -p no:cacheprovider --no-cov -q` — 1 skipped without `TAVILY_TEST_API_KEY`; the same test passed earlier on 2026-11-10 with the key (see "Stage 5 real Tavily search and hosted-model runs")
+  - `git diff --check` — passed
+- Known limits carried forward:
+  - In a mixed question, the hosted model did not call `calculate` for a count; a stronger calculator rule in the agent prompt is not implemented.
+  - No total context budget across searches: each search adds its passages to the prompt, up to `AGENT_MAX_STEPS` searches per attempt.
+  - `metadata.route` was removed (breaking change for API clients).
+  - Web content goes to the model without prompt-injection filtering (Stage 8, by the author's decision).
+  - The verification retry path was not run against the hosted model; it is covered by mocked tests.
+  - Optional plan work is not implemented: dynamic tool registration, auth propagation, result caching, and more MCP servers.

@@ -15,7 +15,7 @@ from insightflow.agents.nodes.verify import JUDGE_SYSTEM_PROMPT
 from insightflow.core.exceptions import ToolError
 from insightflow.providers.llm import ChatMessage
 from insightflow.rag.models import Chunk, RetrievalQuery, RetrievedChunk
-from insightflow.tools.models import ToolResult, ToolSpec
+from insightflow.tools.models import ToolErrorCode, ToolResult, ToolSpec
 
 ROLE_BY_SYSTEM_PROMPT = {
     AGENT_SYSTEM_PROMPT: "agent",
@@ -144,6 +144,7 @@ class FakeToolClient:
     """A `ToolClient` with fixed tools and replies; records every call.
 
     `replies` maps a tool name to its output text. Without a reply, a tool echoes its arguments.
+    `list_error` makes every listing raise; `call_error` makes every call fail with that code.
     """
 
     def __init__(
@@ -153,6 +154,7 @@ class FakeToolClient:
         *,
         replies: Mapping[str, str] | None = None,
         list_error: ToolError | None = None,
+        call_error: ToolErrorCode | None = None,
     ) -> None:
         self._server_name = server_name
         self.specs = [
@@ -165,6 +167,8 @@ class FakeToolClient:
         ]
         self.replies = dict(replies or {})
         self.list_error = list_error
+        self.call_error = call_error
+        self.list_calls = 0
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     @property
@@ -172,6 +176,7 @@ class FakeToolClient:
         return self._server_name
 
     async def list_tools(self) -> Sequence[ToolSpec]:
+        self.list_calls += 1
         if self.list_error is not None:
             raise self.list_error
         return self.specs
@@ -183,7 +188,8 @@ class FakeToolClient:
             server=self._server_name,
             tool=name,
             arguments=dict(arguments),
-            status="ok",
+            status="ok" if self.call_error is None else "error",
+            error=self.call_error,
             output=self.replies.get(name, repr(sorted(arguments.items()))),
             started_at=datetime.now(UTC),
             duration_ms=1.0,

@@ -8,6 +8,7 @@ import pytest
 from insightflow import main
 from insightflow.api.dependencies import get_tool_set
 from insightflow.core.config import Settings
+from insightflow.core.exceptions import ToolError
 from insightflow.tools.calculator_server import create_calculator_server
 from insightflow.tools.mcp_client import McpToolClient
 from insightflow.tools.registry import ToolRegistration, ToolSet
@@ -129,6 +130,22 @@ async def test_default_bounds_run_within_the_recursion_limit() -> None:
     body = response.json()
     assert len(body["metadata"]["steps"]) == 8
     assert body["verification"]["status"] == "failed"
+
+
+async def test_server_that_is_down_is_tried_once_per_cooldown() -> None:
+    """Regression: a server whose listing failed was tried again on every agent step."""
+    down = FakeToolClient("tavily", ["tavily_search"], list_error=ToolError())
+    tools = ToolSet([ToolRegistration(down)])
+    chat = ScriptedChatProvider(agent=[search("a"), search("b"), search("c"), ANSWER])
+
+    application = app_with_tools(chat, tools, agent_max_steps=4)
+    async with client_for(application) as client:
+        first = await client.post("/query", json={"query": "q1"})
+        second = await client.post("/query", json={"query": "q2"})
+
+    assert first.status_code == second.status_code == 200
+    assert len(first.json()["metadata"]["steps"]) == 3
+    assert down.list_calls == 1
 
 
 async def test_stream_reports_agent_and_act_events() -> None:

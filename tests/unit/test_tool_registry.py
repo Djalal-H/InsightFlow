@@ -93,6 +93,88 @@ async def test_tool_set_refuses_unlisted_tools_without_a_call() -> None:
     assert client.calls == []
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def test_failed_listing_pauses_the_server_until_the_cooldown_ends() -> None:
+    """A server that cannot list its tools is not contacted again during the cooldown."""
+    clock = FakeClock()
+    broken = FakeToolClient("broken", ["web"], list_error=ToolError())
+    good = FakeToolClient("good", ["calc"])
+    tools = ToolSet(
+        [ToolRegistration(broken), ToolRegistration(good)],
+        failure_cooldown_seconds=60,
+        clock=clock,
+    )
+
+    for _ in range(3):
+        assert [spec.name for spec in await tools.list_tools()] == ["calc"]
+    assert (broken.list_calls, good.list_calls) == (1, 3)
+
+    clock.now += 60
+    broken.list_error = None
+    assert [spec.name for spec in await tools.list_tools()] == ["web", "calc"]
+    assert broken.list_calls == 2
+
+
+@pytest.mark.parametrize("error", ["timeout", "unavailable"])
+async def test_server_failure_in_a_call_pauses_the_server(error: Any) -> None:
+    """After a timeout or an unavailable server, calls fail at once and the catalog hides it."""
+    clock = FakeClock()
+    web = FakeToolClient("web", ["search"], call_error=error)
+    registration = ToolRegistration(web)
+    tools = ToolSet([registration], failure_cooldown_seconds=30, clock=clock)
+    await tools.list_tools()
+
+    first = await tools.call_tool("search", {"query": "a"})
+    second = await tools.call_tool("search", {"query": "b"})
+
+    assert first.error == error
+    assert (second.status, second.error, second.server) == ("error", "unavailable", "web")
+    assert second.arguments == {"query": "b"}
+    assert len(web.calls) == 1
+    assert await tools.list_tools() == []
+    assert tools.is_paused(registration)
+
+    clock.now += 30
+    web.call_error = None
+    assert [spec.name for spec in await tools.list_tools()] == ["search"]
+    assert (await tools.call_tool("search", {"query": "c"})).status == "ok"
+
+
+@pytest.mark.parametrize("error", ["tool_failed", "invalid_arguments"])
+async def test_tool_and_argument_errors_do_not_pause_the_server(error: Any) -> None:
+    web = FakeToolClient("web", ["search"], call_error=error)
+    tools = ToolSet([ToolRegistration(web)], clock=FakeClock())
+    await tools.list_tools()
+
+    await tools.call_tool("search", {"query": "a"})
+    await tools.call_tool("search", {"query": "b"})
+
+    assert len(web.calls) == 2
+    assert [spec.name for spec in await tools.list_tools()] == ["search"]
+
+
+async def test_zero_cooldown_tries_the_server_every_time() -> None:
+    broken = FakeToolClient("broken", ["web"], list_error=ToolError())
+    tools = ToolSet([ToolRegistration(broken)], failure_cooldown_seconds=0)
+
+    await tools.list_tools()
+    await tools.list_tools()
+
+    assert broken.list_calls == 2
+
+
+def test_negative_cooldown_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        ToolSet(failure_cooldown_seconds=-1)
+
+
 def test_empty_tool_set() -> None:
     assert ToolSet().is_empty
     assert not ToolSet([ToolRegistration(FakeToolClient())]).is_empty
@@ -276,6 +358,12 @@ async def test_default_tool_set_has_only_the_calculator() -> None:
     specs = await create_tool_set(settings).list_tools()
 
     assert [spec.name for spec in specs] == [CALCULATOR_TOOL]
+
+
+def test_tool_set_uses_the_cooldown_setting() -> None:
+    settings = Settings(_env_file=None, tool_failure_cooldown_seconds=5)
+
+    assert create_tool_set(settings).failure_cooldown_seconds == 5
 
 
 def test_tool_set_with_everything_disabled_is_empty() -> None:

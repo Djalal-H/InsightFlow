@@ -101,11 +101,12 @@ a real Qdrant client.
 `Settings(_env_file=None)` still sees `.env` values: pass values explicitly when a test depends
 on them.
 
-### Tools (Stage 5, in progress)
+### Tools (Stage 5)
 
 `tools/protocols.py:ToolClient` is the per-server boundary; `tools/registry.py:ToolSet` joins
 servers into one catalog (fixed arguments and a web-source parser per registration) and is what
-the `agent` and `act` nodes use. `tools/mcp_client.py:McpToolClient` is the only MCP client code (`mcp` 2.x:
+the `agent` and `act` nodes use. A failed listing or a `timeout`/`unavailable` call pauses
+that server for `TOOL_FAILURE_COOLDOWN_SECONDS` across all requests (the app keeps one set). `tools/mcp_client.py:McpToolClient` is the only MCP client code (`mcp` 2.x:
 `Client` and `MCPServer`; `FastMCP` was renamed). `call_tool` never raises: allowlist,
 input-schema (jsonschema), timeout, server, and transport failures become a `ToolResult` with an
 error code; oversized output is cut and marked `truncated`. `list_tools` raises

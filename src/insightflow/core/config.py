@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     tool_web_search_enabled: bool = False
     tool_timeout_seconds: float = Field(default=20.0, gt=0.0, le=120.0)
     tool_max_output_chars: int = Field(default=6000, ge=200, le=50_000)
+    tool_failure_cooldown_seconds: float = Field(default=60.0, ge=0.0, le=3600.0)
     tavily_api_key: SecretStr | None = None
     tavily_mcp_url: str = "https://mcp.tavily.com/mcp/"
     web_search_max_results: int = Field(default=5, ge=1, le=20)

@@ -255,7 +255,7 @@ curl -N localhost:8000/query/stream -H 'content-type: application/json' \
 Request validation and configuration errors that occur before the stream starts return normal
 HTTP errors. After the stream starts, the status is 200 and a failure is sent as one `error` event.
 
-## MCP tools (Stage 5, in progress)
+## MCP tools (Stage 5)
 
 InsightFlow is an MCP client. Two tool servers are available:
 
@@ -282,6 +282,13 @@ for one MCP server with the official MCP SDK (`mcp==2.3.0`). Each call:
 - returns a result with a call ID, start time, duration, and a stable error code
   (`unknown_tool`, `invalid_arguments`, `tool_failed`, `timeout`, `unavailable`). Failures are
   results, not exceptions, and do not include transport or server exception text.
+
+`insightflow.tools.registry.ToolSet` joins the servers into one catalog. A server whose tool
+listing fails, or whose call fails with `timeout` or `unavailable`, is paused for
+`TOOL_FAILURE_COOLDOWN_SECONDS` (default 60; 0 turns pauses off). While it is paused, the agent
+does not see its tools and its calls fail at once with `unavailable`, so a server that is down
+costs one timeout, not one on each agent step. The set is shared by all requests, so the pause
+applies to all of them. `tool_failed` and `invalid_arguments` do not pause a server.
 
 For Tavily, `max_results` is fixed to `WEB_SEARCH_MAX_RESULTS`, raw page content and images are
 turned off, and the API key is sent as an `Authorization: Bearer` header, not in the URL. Web

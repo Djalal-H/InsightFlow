@@ -112,7 +112,7 @@ def create_tool_set(settings: Settings) -> ToolSet:
                 max_output_chars=settings.tool_max_output_chars,
             )
         )
-    return ToolSet(registrations)
+    return ToolSet(registrations, failure_cooldown_seconds=settings.tool_failure_cooldown_seconds)
 
 
 def get_tool_set(request: Request) -> ToolSet:
