@@ -9,6 +9,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 from insightflow.agents.checkpoint import create_checkpoint_serializer
+from insightflow.agents.nodes.agent import AGENT_SYSTEM_PROMPT
 from insightflow.agents.nodes.answer import GROUNDED_SYSTEM_PROMPT, NO_CONTEXT_ANSWER
 from insightflow.api.dependencies import (
     get_chat_provider,
@@ -29,7 +30,7 @@ from insightflow.main import create_app
 from insightflow.providers.llm import ChatMessage, ChatProvider, LiteLLMChatProvider
 from insightflow.rag.models import Chunk, RetrievalQuery, RetrievedChunk
 from insightflow.rag.retrieval import BudgetedContextAssembler
-from tests.fakes import ScriptedChatProvider
+from tests.fakes import ANSWER, ScriptedChatProvider, search
 
 
 class FakeChatProvider:
@@ -104,13 +105,14 @@ def make_candidate() -> RetrievedChunk:
     )
 
 
-# The router and the LLM judge are off in the default test settings, so the route makes exactly
-# one model call. Workflow tests that need them enable them explicitly.
+# The LLM judge and retries are off in the default test settings. A provider that replies with
+# the same text to every prompt makes the agent search the question once and then answer, so a
+# request makes three model calls: agent, agent, answer. Tests that need more enable it.
 DETERMINISTIC_SETTINGS: dict[str, Any] = {
-    "agent_router_enabled": False,
     "agent_verifier_llm_enabled": False,
     "agent_max_attempts": 1,
 }
+DEFAULT_NODES = ["agent", "act", "agent", "answer", "verify", "finalize"]
 
 
 def make_app(
@@ -163,18 +165,34 @@ async def test_query_answers_from_retrieved_context_with_sources() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["metadata"].pop("duration_ms") >= 0
+    [step] = body["metadata"]["steps"]
+    assert step.pop("duration_ms") >= 0
+    assert len(step.pop("call_id")) == 32
     assert body == {
         "answer": "InsightFlow is a RAG platform [1].",
         "thread_id": None,
         "verification": {"status": "passed", "method": "deterministic", "issues": []},
         "metadata": {
-            "route": "retrieve",
             "attempts": 1,
             "retrieval_queries": ["What is InsightFlow?"],
-            "nodes": ["route", "retrieve", "answer", "verify", "finalize"],
+            "steps": [
+                {
+                    "attempt": 1,
+                    "thought": "Search the documents for the question.",
+                    "tool": "search_documents",
+                    "server": "insightflow",
+                    "arguments": {"query": "What is InsightFlow?"},
+                    "status": "ok",
+                    "error": None,
+                    "truncated": False,
+                    "sources": [1],
+                }
+            ],
+            "nodes": DEFAULT_NODES,
         },
         "sources": [
             {
+                "kind": "document",
                 "citation": 1,
                 "source_identifier": "PDF/overview.pdf",
                 "source_name": "overview.pdf",
@@ -194,8 +212,8 @@ async def test_query_answers_from_retrieved_context_with_sources() -> None:
     assert user_prompt.endswith("Question: What is InsightFlow?")
 
 
-async def test_query_without_retrieved_context_does_not_call_the_model() -> None:
-    """An empty retrieval result returns a fixed answer and no sources."""
+async def test_query_without_retrieved_context_does_not_call_the_answer_model() -> None:
+    """An empty search result returns a fixed answer and no sources."""
     provider = FakeChatProvider()
 
     response = await post_query(provider, FakeRetriever([]))
@@ -204,7 +222,8 @@ async def test_query_without_retrieved_context_does_not_call_the_model() -> None
     body = response.json()
     assert (body["answer"], body["sources"]) == (NO_CONTEXT_ANSWER, [])
     assert body["verification"]["status"] == "skipped"
-    assert provider.messages is None
+    assert provider.messages is not None
+    assert provider.messages[0] == {"role": "system", "content": AGENT_SYSTEM_PROMPT}
 
 
 async def test_query_returns_configuration_error_for_missing_model() -> None:
@@ -325,20 +344,15 @@ def test_query_openapi_documents_stream_and_thread_endpoints() -> None:
     assert "404" in paths["/threads/{thread_id}"]["delete"]["responses"]
 
 
-async def test_query_routes_retries_and_reports_execution_metadata() -> None:
-    """With the router, judge, and retries on, the response describes the whole run."""
+async def test_query_retries_and_reports_execution_metadata() -> None:
+    """With the judge and retries on, the response describes the whole run."""
     chat = ScriptedChatProvider(
-        route='{"route": "retrieve", "standalone_query": "InsightFlow definition"}',
+        agent=[search("InsightFlow definition"), ANSWER, search("InsightFlow purpose"), ANSWER],
         answer=["No citation.", "InsightFlow is a RAG platform [1]."],
-        rewrite='{"query": "InsightFlow purpose"}',
     )
     retriever = FakeRetriever([make_candidate()])
     application = make_app(
-        chat,
-        retriever,
-        agent_router_enabled=True,
-        agent_verifier_llm_enabled=True,
-        agent_max_attempts=2,
+        chat, retriever, agent_verifier_llm_enabled=True, agent_max_attempts=2
     )
 
     async with client_for(application) as client:
@@ -351,21 +365,23 @@ async def test_query_routes_retries_and_reports_execution_metadata() -> None:
     assert body["metadata"]["attempts"] == 2
     expected_queries = ["InsightFlow definition", "InsightFlow purpose"]
     assert body["metadata"]["retrieval_queries"] == expected_queries
+    assert [step["attempt"] for step in body["metadata"]["steps"]] == [1, 2]
     assert [query.text for query in retriever.queries] == expected_queries
-    assert chat.roles() == ["route", "answer", "rewrite", "answer", "judge"]
+    assert chat.roles() == ["agent", "agent", "answer", "agent", "agent", "answer", "judge"]
 
 
-async def test_query_direct_route_returns_no_sources() -> None:
-    chat = ScriptedChatProvider(route='{"route": "direct", "standalone_query": "hello"}')
+async def test_query_direct_reply_returns_no_sources() -> None:
+    chat = ScriptedChatProvider(agent=ANSWER)
     retriever = FakeRetriever([make_candidate()])
 
-    async with client_for(make_app(chat, retriever, agent_router_enabled=True)) as client:
+    async with client_for(make_app(chat, retriever)) as client:
         response = await client.post("/query", json={"query": "hello"})
 
     body = response.json()
     assert body["answer"] == "Hello! Ask me about the indexed documents."
     assert body["sources"] == []
-    assert body["metadata"]["route"] == "direct"
+    assert body["metadata"]["steps"] == []
+    assert body["metadata"]["nodes"] == ["agent", "answer", "finalize"]
     assert body["verification"] == {"status": "skipped", "method": "none", "issues": []}
     assert retriever.queries == []
 

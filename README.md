@@ -137,71 +137,86 @@ makes billable provider requests; the optional JSON export remains disabled unti
 set explicitly. Clear executed notebook outputs before committing to avoid retaining document
 content in Git.
 
-## Grounded query workflow
+## Agent query workflow (ReAct)
 
-`POST /query` runs a LangGraph workflow with conditional edges:
+`POST /query` runs a LangGraph ReAct loop with a verified answer:
 
 ```text
-route ─┬─ direct ────────────────────────→ answer → finalize
-       └─ retrieve → retrieve → answer → verify ─┬─ finalize
-                        ▲                         │
-                        └──── rewrite ◄───────────┘  (failed, attempts left)
+agent ⇄ act          (search_documents, calculate, tavily_search, …)
+  └→ answer ─┬─ verify ─┬─ finalize
+             │          └─ retry → agent   (failed, attempts left)
+             └─ finalize                   (no action: direct reply)
 ```
 
-1. `route` asks the chat model for JSON: `retrieve` or `direct` (greetings, questions about the
-   assistant, or questions that the conversation already answers), plus a self-contained version
-   of the question that resolves references to earlier turns. Unreadable output falls back to
-   `retrieve` with the question as written. `AGENT_ROUTER_ENABLED=false` skips this model call.
-2. `retrieve` embeds the retrieval query with `EmbeddingProvider.embed_query`, searches Qdrant for
-   `RAG_CANDIDATE_TOP_K` chunks (`DenseRetriever`), and selects passages in rank order until
-   `RAG_GENERATION_MAX_CHUNKS` or `RAG_CONTEXT_TOKEN_BUDGET` is reached
-   (`BudgetedContextAssembler`). Tokens are counted with the embedding model's tokenizer, which
-   approximates the chat model's count.
-3. `answer` sends the numbered passages and the last `AGENT_HISTORY_TURNS` turns to the chat model,
-   with an instruction to answer only from the passages and cite them as `[1]`. When nothing is
-   retrieved, it returns a fixed "could not find" answer without a model call. Direct answers use
-   only the conversation.
-4. `verify` first checks citations without a model (the answer is not empty, cites at least one
-   passage, and cites only passages that exist). If that passes and
-   `AGENT_VERIFIER_LLM_ENABLED=true`, an LLM judge returns JSON that says whether every claim is
-   supported.
-5. `rewrite` runs when verification fails and fewer than `AGENT_MAX_ATTEMPTS` answers were made.
-   It asks the model for a new retrieval query, and the workflow retrieves again. When the
-   attempts are used up, the last answer is returned with `verification.status = "failed"`.
+1. `agent` sends the question, the last `AGENT_HISTORY_TURNS` turns, the tool catalog with input
+   schemas, and every observation so far to the chat model. The model returns one JSON action:
+   `{"thought": "…", "action": "<tool>", "arguments": {…}}`, or `{"action": "answer"}` when it has
+   enough. A tool can be used at any step, for example: search the documents, then calculate with
+   a number from a passage, then search the web.
+2. `act` runs the action and records the observation. `search_documents` is a local tool: it
+   embeds the query, searches Qdrant for `RAG_CANDIDATE_TOP_K` chunks, and keeps passages within
+   `RAG_GENERATION_MAX_CHUNKS` and `RAG_CONTEXT_TOKEN_BUDGET` per search. Other actions go to the
+   MCP tools (see [MCP tools](#mcp-tools-stage-5-in-progress)). A failed call is an observation,
+   not an error; storage and embedding failures still stop the request.
+3. `answer` writes the answer from the observations and cites sources as `[n]`. Document passages
+   and web pages share one numbering per turn, in the order they were first observed. Without
+   any action, it replies from the conversation only. When the actions found nothing usable, it
+   returns a fixed "could not find" answer without a model call.
+4. `verify` checks citations without a model (the answer is not empty, cites at least one source,
+   and cites only sources that exist). If that passes and `AGENT_VERIFIER_LLM_ENABLED=true`, an
+   LLM judge checks every claim against the observations; a calculated value counts as supported.
+   Answers with no sources (direct replies, or tool results only) are `skipped`.
+5. `retry` runs when verification fails and fewer than `AGENT_MAX_ATTEMPTS` answers were made. It
+   sends the issues back to the agent, which gets a new step budget. When the attempts are used
+   up, the last answer is returned with `verification.status = "failed"`.
 6. `finalize` adds the turn to the conversation history.
 
-A retrieved question makes at most `3 + 3 × (AGENT_MAX_ATTEMPTS − 1)` chat calls: router,
-answer, and judge, plus rewrite, answer, and judge for each retry. With the defaults that is 6.
+**Bounds.** The loop always ends: the agent answers without a model call after
+`AGENT_MAX_STEPS` actions in an attempt (default 4), and a call that repeats an earlier call
+(same tool, same arguments, ignoring case) ends the attempt. Unreadable agent output searches the
+question as written once, then answers. The routes pass a LangGraph `recursion_limit` computed
+from both bounds, because the defaults can need more than LangGraph's limit of 25 steps.
+
+An attempt makes at most `AGENT_MAX_STEPS + 2` chat calls: the agent steps, the answer, and the
+judge. With the defaults that is 6 per attempt and 12 per question.
 
 ```json
 {
-  "answer": "InsightFlow is an API-first RAG platform [1].",
+  "answer": "15% of the 1200 dollar fee [1] is 180.",
   "sources": [
     {
+      "kind": "document",
       "citation": 1,
-      "source_identifier": "PDF/overview.pdf",
-      "source_name": "overview.pdf",
+      "source_identifier": "DOCX/tuition.docx",
+      "source_name": "tuition.docx",
       "chunk_id": "…",
-      "page_start": 2,
-      "page_end": 2,
+      "page_start": null,
+      "page_end": null,
       "score": 0.82
     }
   ],
   "thread_id": "3f1c…",
   "verification": {"status": "passed", "method": "llm", "issues": []},
   "metadata": {
-    "route": "retrieve",
     "attempts": 1,
-    "retrieval_queries": ["What is InsightFlow?"],
-    "nodes": ["route", "retrieve", "answer", "verify", "finalize"],
-    "duration_ms": 2140
+    "retrieval_queries": ["annual tuition fee"],
+    "steps": [
+      {"attempt": 1, "thought": "Find the fee.", "tool": "search_documents",
+       "server": "insightflow", "arguments": {"query": "annual tuition fee"}, "call_id": "…",
+       "status": "ok", "error": null, "truncated": false, "sources": [1], "duration_ms": 310.2},
+      {"attempt": 1, "thought": "Calculate 15%.", "tool": "calculate", "server": "calculator",
+       "arguments": {"expression": "0.15 * 1200"}, "call_id": "…", "status": "ok",
+       "error": null, "truncated": false, "sources": [], "duration_ms": 11.8}
+    ],
+    "nodes": ["agent", "act", "agent", "act", "agent", "answer", "verify", "finalize"],
+    "duration_ms": 4120
   }
 }
 ```
 
-`sources` lists every passage given to the model in the last attempt; `citation` matches the
-numbers in the answer. `verification.status` is `passed`, `failed`, `unchecked` (the judge reply
-could not be read), or `skipped` (direct answers and empty retrieval).
+`sources` lists every distinct source the agent observed; `citation` matches the numbers in the
+answer, and `steps[].sources` shows which step returned each one. `verification.status` is
+`passed`, `failed`, `unchecked` (the judge reply could not be read), or `skipped`.
 Provider failures return the sanitized `provider_*` errors, and Qdrant failures (including a
 missing collection before the first ingestion) return HTTP 503 with code `storage_unavailable`.
 
@@ -226,7 +241,7 @@ Events:
 
 | Event | Data |
 | --- | --- |
-| `node` | `{"node": "route", "route": "retrieve"}` after each step; `retrieve` adds `passages`, `verify` adds `status` |
+| `node` | `{"node": "agent", "action": "search_documents"}` after each step; `act` adds `tool` and `status`, `verify` adds `status`, `retry` adds `attempt` |
 | `token` | `{"attempt": 1, "text": "…"}`: a piece of the answer |
 | `attempt` | `{"attempt": 2}`: a retry started; discard the tokens of earlier attempts |
 | `final` | the complete `QueryResponse` |
@@ -242,26 +257,48 @@ HTTP errors. After the stream starts, the status is 200 and a failure is sent as
 
 ## MCP tools (Stage 5, in progress)
 
-`insightflow.tools.mcp_client.McpToolClient` implements the `ToolClient` contract for one MCP
-server with the official MCP SDK (`mcp==2.3.0`). It connects to an in-process server, a stdio
-subprocess, or a URL. Each call:
+InsightFlow is an MCP client. Two tool servers are available:
+
+| Server | Tool | Setting | Notes |
+|---|---|---|---|
+| Calculator (in this repository, in-process) | `calculate` | `TOOL_CALCULATOR_ENABLED=true` (default) | No network, no key |
+| Tavily (hosted, `TAVILY_MCP_URL`) | `tavily_search` only | `TOOL_WEB_SEARCH_ENABLED=true` and `TAVILY_API_KEY` | Billable; off by default |
+
+The application builds the tool set once at startup, so each server's tool list is fetched once.
+The agent sees these tools next to `search_documents`, whose name is reserved: an MCP tool with
+that name is ignored. Web pages from Tavily become sources with `"kind": "web"`:
+
+```json
+{"kind": "web", "citation": 2, "title": "FastAPI release notes", "url": "https://…"}
+```
+
+**Controls.** `insightflow.tools.mcp_client.McpToolClient` implements the `ToolClient` contract
+for one MCP server with the official MCP SDK (`mcp==2.3.0`). Each call:
 
 - is refused when the tool is not on the client's allowlist or not offered by the server;
 - has its arguments checked against the tool's input schema before it is sent;
-- stops after `timeout_seconds`;
-- has its text output limited to `max_output_chars` (`truncated` is set when it is cut);
-- returns a `ToolResult` with a call ID, start time, duration, and a stable error code
+- stops after `TOOL_TIMEOUT_SECONDS`;
+- has its text output limited to `TOOL_MAX_OUTPUT_CHARS` (`truncated` is set when it is cut);
+- returns a result with a call ID, start time, duration, and a stable error code
   (`unknown_tool`, `invalid_arguments`, `tool_failed`, `timeout`, `unavailable`). Failures are
   results, not exceptions, and do not include transport or server exception text.
 
-The first tool is a calculator (`insightflow.tools.calculator_server`, tool `calculate`). It
-parses arithmetic with `ast` and evaluates only allow-listed operators, functions (`abs`, `round`,
-`min`, `max`, `sqrt`, `floor`, `ceil`, `log`, `log10`, `exp`), and constants (`pi`, `e`). It
-never uses `eval`, and it limits expression length and result size. Other MCP clients can run it
-over stdio:
+For Tavily, `max_results` is fixed to `WEB_SEARCH_MAX_RESULTS`, raw page content and images are
+turned off, and the API key is sent as an `Authorization: Bearer` header, not in the URL. Web
+content goes to the model without prompt-injection filtering; that control is Stage 8 work.
+
+**Calculator.** `insightflow.tools.calculator_server` parses arithmetic with `ast` and evaluates
+only allow-listed operators, functions (`abs`, `round`, `min`, `max`, `sqrt`, `floor`, `ceil`,
+`log`, `log10`, `exp`), and constants (`pi`, `e`). It never uses `eval`, and it limits
+expression length and result size. Other MCP clients can run it over stdio:
 
 ```bash
 PYTHONPATH=src python -m insightflow.tools.calculator_server
 ```
 
-The workflow does not call tools yet; router and graph integration is the next Stage 5 step.
+**Opt-in Tavily test.** It makes one billable search and uses its own variable, so that a key in
+`.env` never makes the default suite billable:
+
+```bash
+TAVILY_TEST_API_KEY=tvly-... pytest -m tavily
+```

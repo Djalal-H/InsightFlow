@@ -2,7 +2,7 @@
 
 ## Current status
 
-- Current stage: Stage 5 (MCP client boundary and calculator server on `feature/stage5-mcp-tools`; not wired into the workflow)
+- Current stage: Stage 5 (ReAct agent with document search, calculator, and Tavily web search on `feature/stage5-mcp-tools`; verified with mocks and in-process servers only)
 - Last updated: 2026-11-04
 - Overall state: in progress
 
@@ -14,7 +14,7 @@
 | Stage 2 | complete    | Query workflow, provider validation and error mapping, and mocked contract coverage verified                |
 | Stage 3 | complete | Ingestion, Qdrant persistence, dense retrieval, and grounded answers with sources verified with mocks and on a real Qdrant server; a hosted-model run on `corpus/MD` was reported working by the author (2026-10-29) |
 | Stage 4 | in progress | Router, verifier, bounded retries, execution metadata, SQLite checkpointer with threads, and SSE streaming verified with mocks; no hosted-model run yet |
-| Stage 5 | in progress | MCP client adapter with allowlist, input-schema, timeout, and output-size controls, and a calculator MCP server, verified in-process and over stdio; no graph integration or web search yet |
+| Stage 5 | in progress | MCP client adapter with per-call controls, calculator MCP server, ReAct agent loop with document search as a tool, and Tavily web search with web sources, verified with mocks and in-process servers; no real Tavily call and no hosted-model run yet |
 | Stage 6 | not started | —                                                                                                          |
 | Stage 7 | not started | —                                                                                                          |
 | Stage 8 | not started | —                                                                                                          |
@@ -288,3 +288,71 @@
   - Step 5: Tavily web search through its hosted MCP endpoint, a web source type with URLs, and an opt-in real-call test.
   - No hosted-model run for Stage 4 or Stage 5.
 - Commit: `2a57796`
+
+### 2026-11-04 — Stage 5 ReAct agent workflow and Tavily web search
+
+- Stage: Stage 5
+- Status: partial (steps 4–5 implemented; verified with mocks and in-process MCP servers only)
+- Scope: Replaced the Stage 4 routed workflow with a ReAct loop in which the agent can use any tool at any step, document search included; added a tool set over several MCP servers, Tavily web search, one source numbering for documents and web pages, and per-step audit metadata. A first version with a router `tool` branch and a separate tool node was built and then replaced by the author's decision before it was committed: it allowed tools only on one branch.
+- Changed:
+  - `src/insightflow/agents/graph.py` — `agent ⇄ act → answer → verify ⇄ retry → finalize`; direct replies (no observations) skip verification. `recursion_limit(max_steps, max_attempts)` gives the LangGraph step limit for the bounded loops.
+  - `src/insightflow/agents/nodes/agent.py` — new: one prompted-JSON `AgentAction` per step from the question, history, catalog with input schemas, observations, verification feedback, and the steps left. Without a model call it answers when `AGENT_MAX_STEPS` actions were made in the attempt or when the action repeats an earlier call (same tool and arguments, ignoring case and spaces). Unreadable output searches the question once, then answers.
+  - `src/insightflow/agents/nodes/act.py`, `retry.py` — new: `act` runs the pending action (local search or the tool set) and records an `Observation`; `retry` starts the next attempt and sends the verification issues to the agent.
+  - `src/insightflow/agents/document_search.py` — new: `search_documents` as a local tool over `Retriever` and `ContextAssembler`, with a JSON input schema; the name is reserved, and MCP tools with it are hidden. Storage and embedding errors still raise.
+  - `src/insightflow/agents/observations.py` — new: `number_sources` numbers passages and web pages once per turn in order of first observation; `render_observations`, `render_tool_catalog`, and `has_evidence` (sources, tool outputs, and errors reported by a tool count; timeouts, unavailable servers, unknown tools, invalid arguments, and empty searches do not).
+  - `src/insightflow/agents/nodes/answer.py`, `verify.py` — answer and judge use all observations; citations are checked against all numbered sources; answers without sources are `skipped`.
+  - Removed: `agents/nodes/route.py`, `rewrite.py`, `retrieve.py`, `RouteDecision`, `RewrittenQuery`, and the setting `AGENT_ROUTER_ENABLED`.
+  - `src/insightflow/agents/state.py`, `models.py`, `checkpoint.py` — per-turn `observations`, `pending_action`, and `feedback`; `CHECKPOINT_STATE_TYPES` is now `AgentAction`, `ConversationTurn`, `Observation`, `VerificationResult`.
+  - `src/insightflow/tools/registry.py`, `web_search.py`, `validation.py` — `ToolSet` (one catalog over several servers, failing servers left out, first server keeps a duplicate name, fixed arguments, web-source parser); Tavily registration (`tavily_search` only, `max_results` fixed to `WEB_SEARCH_MAX_RESULTS`, raw content and images off, key in an `Authorization: Bearer` header) and `parse_tavily_sources`; `argument_problem` moved out of `mcp_client.py`.
+  - `src/insightflow/tools/mcp_client.py`, `models.py` — transport factories, `http_transport(url, headers)` over `httpx2`, `WebSource`, and `ToolResult.web_sources`.
+  - `src/insightflow/api/` — `sources` discriminated by `kind` (`document`, `web`); `metadata.route` removed (breaking); new `metadata.steps` (`StepReport`: attempt, thought, tool, server, arguments, call ID, status, error, truncated, source numbers, duration); `retrieval_queries` now lists the `search_documents` queries; `resolve_thread` always returns a run config with `recursion_limit`; stream `node` events for `agent`, `act`, and `retry`; `create_tool_set` and `get_tool_set`.
+  - `src/insightflow/main.py` — the lifespan calls `configure_logging` and then builds the tool set once.
+  - `src/insightflow/core/config.py`, `.env.example` — `AGENT_MAX_STEPS` (default 4, 1–8), `TOOL_CALCULATOR_ENABLED`, `TOOL_WEB_SEARCH_ENABLED`, `TOOL_TIMEOUT_SECONDS`, `TOOL_MAX_OUTPUT_CHARS`, `TAVILY_API_KEY` (`SecretStr`), `TAVILY_MCP_URL`, `WEB_SEARCH_MAX_RESULTS`; web search without a key fails at startup.
+  - `requirements.txt` — adds `httpx2` (imported directly; already a dependency of `mcp`). `pyproject.toml` — new `tavily` marker.
+  - `README.md`, `CLAUDE.md`, `docs/Implement Plan Draft.md` — ReAct workflow, bounds, cost, response shape, tools, and the pattern decision.
+  - Tests: rewritten `tests/unit/test_agent_graph.py` and `tests/unit/test_agent_nodes.py`; new `tests/unit/test_tool_registry.py`, `tests/integration/test_query_tools_api.py`, `tests/integration/test_tavily_search.py` (opt-in); updated `tests/fakes.py` (roles `agent`, `answer`, `direct`, `judge`; `FakeToolClient`, `TAVILY_TEXT`, `search()`, `action()`, `ANSWER`), `tests/unit/test_structured_json.py`, `tests/unit/test_mcp_tool_client.py`, `tests/integration/test_query_api.py`, `tests/integration/test_query_stream_api.py`.
+- Validation:
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues in 60 source files
+  - `pytest -p no:cacheprovider -q` — passed: 353 passed, 2 skipped (the `qdrant` and `tavily` opt-in tests); coverage 94%; every `agents/` module at 92–100%, `tools/registry.py`, `tools/web_search.py`, and `tools/validation.py` at 100%. The tests include a worst case (an agent that never stops and answers that always fail) for `(max_steps, max_attempts)` = (1, 1), (2, 3), (4, 2), (8, 4), and the default bounds through the API.
+  - `pytest -m tavily -p no:cacheprovider -q --no-cov` — 1 skipped, 354 deselected (no `TAVILY_TEST_API_KEY`); the real Tavily call was not run.
+  - `git diff --check` — passed
+  - `CHECKPOINT_BACKEND=none TOOL_WEB_SEARCH_ENABLED=false uvicorn insightflow.main:app --app-dir src --port 8767` (stopped with `kill`) — startup and shutdown completed; `GET /health/live` and `GET /openapi.json` returned 200; `ExecutionMetadata` has `attempts`, `duration_ms`, `nodes`, `retrieval_queries`, `steps`. No query was sent to a model.
+- Decisions:
+  - ReAct with prompted JSON, not native function calling: LiteLLM's registry reports that the configured model (`nvidia_nim/nvidia/nemotron-3.5-bolt-e4b`) does not support function calling. Native calls can be added behind `ChatProvider`.
+  - The agent only decides and a separate `answer` node writes the answer, so token streaming and the grounded answer prompt are kept; it costs one call per attempt.
+  - Document search is a local tool, not MCP, because its result carries passages with provenance for citations.
+  - The agent writes its own standalone search queries from the history, so the router is not needed; a greeting is one agent call that answers.
+  - Sources are numbered once per turn across steps and attempts; a repeated passage or page keeps its first number.
+  - Worst-case cost per question is `AGENT_MAX_ATTEMPTS × (AGENT_MAX_STEPS + 2)` chat calls (12 with the defaults); Stage 4 had at most 6. Prompt size grows with each search, up to `AGENT_MAX_STEPS` × the per-search context budget.
+  - A tool server whose listing fails is tried again on the next agent step, and each try can take up to `TOOL_TIMEOUT_SECONDS`.
+  - Web content goes to the model without prompt-injection filtering; by the author's decision, that is Stage 8 work.
+- Remaining:
+  - No hosted-model run: the agent's JSON reliability on NVIDIA NIM, whether it searches before it answers factual questions, its tool choices, and the real cost and latency are unverified. Run `PYTHONPATH=src python scripts/manual_chat_test.py` and real queries before Stage 5 is marked complete.
+  - No real Tavily call: the bearer header format (not given by the Tavily docs), the `tavily_search` input schema (taken from the `tavily-mcp` source), and the text format read by `parse_tavily_sources` are unverified. Run `TAVILY_TEST_API_KEY=... pytest -m tavily`.
+  - `metadata.route` was removed; API clients that read it must change.
+  - Caching of failed tool listings and a total context budget across searches are not implemented.
+
+### 2026-11-10 — Stage 5 real Tavily search and hosted-model runs
+
+- Stage: Stage 5
+- Status: partial (web search verified against the real Tavily server and the hosted model; not committed)
+- Scope: First real runs of the ReAct workflow with web search on. They found and fixed a bug that lost all web sources of a large search result.
+- Bug: Tavily's hosted server returns one JSON object (`results` with `url`, `title`, `content`, `score`, `raw_content`, `id`) as structured content and as text. With 5 results, the object was about 7,300 characters, over `TOOL_MAX_OUTPUT_CHARS=6000`. `McpToolClient` cut the text and dropped the structured data at the same limit, so `parse_tavily_sources` found no pages: the response had `sources: []`, and the model cited Tavily's `id` values (for example `[50469a-01]`) instead of `[n]`.
+- Changed:
+  - `src/insightflow/tools/mcp_client.py` — structured output has its own limit, `max_structured_chars` (default `MAX_STRUCTURED_CHARS = 100_000`), because code reads it and the model does not; text keeps `max_output_chars`. Structured data over its limit is dropped, not cut.
+  - `src/insightflow/tools/web_search.py` — `parse_tavily_sources` also reads the JSON text when structured content is missing, and takes `max_page_chars`; the Tavily registration sets it to `max(200, TOOL_MAX_OUTPUT_CHARS // WEB_SEARCH_MAX_RESULTS)`, so the pages of one search stay near the output limit.
+  - Tests: `tests/unit/test_mcp_tool_client.py` (structured data kept over the text limit, dropped over its own limit, invalid `max_structured_chars`); `tests/unit/test_tool_registry.py` (JSON text, cut JSON, page clipping, the registration's page limit, and a regression test with an in-process server that returns five 1,500-character pages).
+- Validation:
+  - `TAVILY_TEST_API_KEY=<from .env> pytest -m tavily -p no:cacheprovider --no-cov -v` — passed (1 passed, 354 deselected). The bearer header is accepted.
+  - `ruff check src tests` — passed; `mypy src` — passed: no issues in 60 source files
+  - `pytest -q -p no:cacheprovider` — passed: 359 passed, 2 skipped; coverage 94%
+  - `uvicorn insightflow.main:app --app-dir src --port 8000` with `TOOL_WEB_SEARCH_ENABLED=true`, Qdrant collection `insightflow_trial` (28 points), chat model `nvidia_nim/nvidia/nemotron-3.5-bolt-e4b`:
+    - Before the fix, `POST /query` "What is the latest FastAPI release and when was it published?": two `tavily_search` steps, both `truncated`, `sources: []`, verification `skipped`, 12.5 s.
+    - After the fix, the same question: one `tavily_search` step with sources [1]–[5] (all `web`, with URLs), answer cites [3] and [5], verification `passed` (`llm`), 6.8 s.
+    - `POST /query/stream`, a question on the docs, the newest version, and a version count: `search_documents` (sources [1]–[6], `document`) then `tavily_search` ([7]–[11], `web`), one numbering; verification `passed`; 11.6 s; stream `node` events for `agent` and `act` arrived before the tokens.
+    - Server log: one `tool call server=tavily tool=tavily_search status=ok` line per search, with no arguments or key; no warnings.
+- Observed model behavior (not fixed):
+  - In the mixed question, the agent did not call `calculate` for the version count; the answer said that it did not know.
+  - The answers gave 0.162.0 as the newest version, but one search result in the same session showed 0.162.2 on the GitHub releases page. The judge checks that claims are supported by the sources, not that the sources are current.
+- Remaining: commit; decide whether the agent prompt needs a stronger rule to calculate with numbers from observations.

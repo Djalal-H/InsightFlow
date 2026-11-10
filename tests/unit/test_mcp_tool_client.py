@@ -11,8 +11,9 @@ from mcp.types import INTERNAL_ERROR, REQUEST_TIMEOUT
 
 from insightflow.core.exceptions import ToolError, ToolTimeoutError
 from insightflow.tools.calculator_server import TOOL_NAME, create_calculator_server
-from insightflow.tools.mcp_client import ERROR_DETAIL_MAX_CHARS, McpToolClient, argument_problem
+from insightflow.tools.mcp_client import McpToolClient
 from insightflow.tools.protocols import ToolClient
+from insightflow.tools.validation import ERROR_DETAIL_MAX_CHARS, argument_problem
 
 
 def calculator_client(**options: Any) -> McpToolClient:
@@ -209,7 +210,7 @@ async def test_slow_tool_times_out() -> None:
 
 
 async def test_large_output_is_truncated() -> None:
-    """Text over the limit is cut, and structured data over the limit is dropped."""
+    """Text over the limit is cut; structured data has its own, larger limit."""
     server, _ = build_test_server()
     client = McpToolClient(server, server_name="test", max_output_chars=100)
 
@@ -218,6 +219,19 @@ async def test_large_output_is_truncated() -> None:
     assert result.status == "ok"
     assert result.truncated is True
     assert len(result.output) == 100
+    assert result.structured == {"data": "x" * 500}
+
+
+async def test_structured_output_over_its_limit_is_dropped() -> None:
+    """Cut JSON cannot be read, so structured data over its limit is dropped, not cut."""
+    server, _ = build_test_server()
+    client = McpToolClient(
+        server, server_name="test", max_output_chars=100, max_structured_chars=200
+    )
+
+    result = await client.call_tool("blob", {"size": 500})
+
+    assert result.truncated is True
     assert result.structured is None
 
 
@@ -235,7 +249,7 @@ async def test_output_within_the_limit_is_kept() -> None:
 async def test_unreachable_server_gives_unavailable_results() -> None:
     """Connection failures become `unavailable` without the transport's message."""
     client = McpToolClient(
-        FailingTransport(ConnectionRefusedError("secret host 10.0.0.5")),
+        lambda: FailingTransport(ConnectionRefusedError("secret host 10.0.0.5")),
         server_name="remote",
     )
 
@@ -255,7 +269,7 @@ async def test_list_timeout_raises_tool_timeout() -> None:
             await asyncio.sleep(5)
 
     client = McpToolClient(
-        HangingTransport(RuntimeError()), server_name="remote", timeout_seconds=0.2
+        lambda: HangingTransport(RuntimeError()), server_name="remote", timeout_seconds=0.2
     )
 
     with pytest.raises(ToolTimeoutError):
@@ -276,7 +290,7 @@ async def test_call_failures_after_listing_are_mapped(error: Exception, code: st
     """A server that fails after its tools were listed gives a sanitized error result."""
     client = calculator_client()
     await client.list_tools()
-    client._target = FailingTransport(error)
+    client._target = lambda: FailingTransport(error)
 
     result = await client.call_tool(TOOL_NAME, {"expression": "1 + 1"})
 
@@ -295,7 +309,7 @@ async def test_protocol_errors_while_listing_raise_tool_errors(
     error: Exception, exception: type[ToolError]
 ) -> None:
     """MCP protocol errors during listing become the matching application error."""
-    client = McpToolClient(FailingTransport(error), server_name="remote")
+    client = McpToolClient(lambda: FailingTransport(error), server_name="remote")
 
     with pytest.raises(exception) as raised:
         await client.list_tools()
@@ -308,6 +322,7 @@ async def test_protocol_errors_while_listing_raise_tool_errors(
         {"server_name": " "},
         {"server_name": "s", "timeout_seconds": 0},
         {"server_name": "s", "max_output_chars": 0},
+        {"server_name": "s", "max_structured_chars": 0},
     ],
 )
 def test_invalid_client_options_are_rejected(options: dict[str, Any]) -> None:

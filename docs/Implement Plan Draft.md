@@ -97,6 +97,10 @@ evaluation expose better choices.
 Selected tools (2026-11-04): an in-repo calculator MCP server first, then Tavily web search through
 its hosted MCP endpoint. Prompt-injection controls for web results remain Stage 8 work.
 
+Workflow pattern (2026-11-04): ReAct. The Stage 4 router and query-rewrite nodes are replaced by
+an agent loop in which document search is one tool next to the MCP tools, so a tool can be used
+at any step; verification and bounded retries are kept.
+
 ### Optional work
 
 - Tool discovery and dynamic registration.

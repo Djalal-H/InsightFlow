@@ -34,12 +34,23 @@ class ToolSpec(BaseModel):
     input_schema: dict[str, Any] = Field(default_factory=dict)
 
 
+class WebSource(BaseModel):
+    """One web page returned by a search tool."""
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str
+    url: str
+    content: str = ""
+
+
 class ToolResult(BaseModel):
     """The outcome and audit record of one tool call.
 
     Every call returns a result, including failed calls, so that the workflow can record the
     attempt and continue. `output` is the text given to the model: the tool's text content on
-    success, or a short, length-limited reason on failure.
+    success, or a short, length-limited reason on failure. `web_sources` holds the pages that a
+    search tool returned, when the tool set knows how to read them.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -53,5 +64,6 @@ class ToolResult(BaseModel):
     output: str = ""
     structured: dict[str, Any] | None = None
     truncated: bool = False
+    web_sources: list[WebSource] = Field(default_factory=list)
     started_at: datetime
     duration_ms: float = Field(ge=0.0)

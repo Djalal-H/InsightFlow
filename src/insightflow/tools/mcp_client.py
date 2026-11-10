@@ -8,27 +8,32 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequence
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-import jsonschema
-from jsonschema.exceptions import best_match
+import httpx2
 from mcp import Client, MCPError, StdioServerParameters
 from mcp.client import Transport
+from mcp.client.streamable_http import streamable_http_client
 from mcp.server.mcpserver import MCPServer
 from mcp.types import REQUEST_TIMEOUT, CallToolResult, TextContent
 
 from insightflow.core.exceptions import ToolError, ToolTimeoutError
 from insightflow.tools.models import ToolErrorCode, ToolResult, ToolSpec
+from insightflow.tools.validation import argument_problem, clip
 
 logger = logging.getLogger(__name__)
 
-McpServerTarget = MCPServer | StdioServerParameters | Transport | str
-"""Where the server is: an in-process server, a subprocess over stdio, a transport, or a URL."""
+McpServerTarget = MCPServer | StdioServerParameters | str | Callable[[], Transport]
+"""Where the server is: an in-process server, a subprocess over stdio, a URL, or a factory that
+returns a new transport for each connection (a transport can be entered only once)."""
 
-ERROR_DETAIL_MAX_CHARS = 300
 UNAVAILABLE_MESSAGE = "The tool server is not available."
+MAX_STRUCTURED_CHARS = 100_000
+"""Structured output is read by code (for example a source parser), not shown to the model, so
+it has its own, larger limit than the text."""
 
 
 class McpToolClient:
@@ -47,6 +52,7 @@ class McpToolClient:
         allowed_tools: Collection[str] | None = None,
         timeout_seconds: float = 10.0,
         max_output_chars: int = 4000,
+        max_structured_chars: int = MAX_STRUCTURED_CHARS,
     ) -> None:
         if not server_name.strip():
             raise ValueError("server_name must not be empty")
@@ -54,11 +60,14 @@ class McpToolClient:
             raise ValueError("timeout_seconds must be positive")
         if max_output_chars < 1:
             raise ValueError("max_output_chars must be at least 1")
+        if max_structured_chars < 1:
+            raise ValueError("max_structured_chars must be at least 1")
         self._target = target
         self._server_name = server_name
         self._allowed = frozenset(allowed_tools) if allowed_tools is not None else None
         self._timeout = timeout_seconds
         self._max_output_chars = max_output_chars
+        self._max_structured_chars = max_structured_chars
         self._specs: dict[str, ToolSpec] | None = None
 
     @property
@@ -138,12 +147,13 @@ class McpToolClient:
 
         text, structured, truncated = self._limit_output(result)
         if result.is_error:
-            return finish(error="tool_failed", output=_clip(text or "The tool reported an error."))
+            return finish(error="tool_failed", output=clip(text or "The tool reported an error."))
         return finish(output=text, structured=structured, truncated=truncated)
 
     def _client(self) -> Client:
+        target = self._target() if callable(self._target) else self._target
         # The MCP response cache is off: specs are cached here, and tool results must be fresh.
-        return Client(self._target, cache=None)
+        return Client(target, cache=None)
 
     async def _load_specs(self) -> dict[str, ToolSpec]:
         if self._specs is not None:
@@ -186,7 +196,11 @@ class McpToolClient:
         logger.warning("tool %s failed server=%s %s", operation, self._server_name, detail)
 
     def _limit_output(self, result: CallToolResult) -> tuple[str, dict[str, Any] | None, bool]:
-        """Join the text content and enforce the output size limit."""
+        """Join the text content and enforce the size limits.
+
+        Text over `max_output_chars` is cut. Structured data is kept whole up to
+        `max_structured_chars` and dropped above it, because cut JSON cannot be read.
+        """
         structured = result.structured_content
         text = "\n".join(
             block.text for block in result.content if isinstance(block, TextContent)
@@ -199,29 +213,26 @@ class McpToolClient:
             truncated = True
         if (
             structured is not None
-            and len(json.dumps(structured, ensure_ascii=False)) > self._max_output_chars
+            and len(json.dumps(structured, ensure_ascii=False)) > self._max_structured_chars
         ):
             structured = None
             truncated = True
         return text, structured, truncated
 
 
-def argument_problem(schema: dict[str, Any], arguments: Mapping[str, Any]) -> str | None:
-    """Return a short reason when the arguments do not match the JSON schema, else None."""
-    try:
-        validator_class = jsonschema.validators.validator_for(schema)
-        validator_class.check_schema(schema)
-    except jsonschema.SchemaError:
-        return "The tool's input schema is not valid."
-    error = best_match(validator_class(schema).iter_errors(dict(arguments)))
-    if error is None:
-        return None
-    location = ".".join(str(part) for part in error.absolute_path)
-    reason = f"{location}: {error.message}" if location else error.message
-    return _clip(f"Invalid arguments: {reason}")
+@asynccontextmanager
+async def http_transport(url: str, headers: Mapping[str, str]) -> AsyncIterator[Any]:
+    """Open a Streamable HTTP transport that sends `headers` with every request.
 
-
-def _clip(text: str) -> str:
-    if len(text) <= ERROR_DETAIL_MAX_CHARS:
-        return text
-    return text[: ERROR_DETAIL_MAX_CHARS - 3] + "..."
+    Use it through a factory, for example `lambda: http_transport(url, headers)`, so that each
+    connection gets a new HTTP client. Credentials go in headers, not in the URL, because HTTP
+    clients log request URLs.
+    """
+    # The MCP SDK's own defaults: a long read timeout, because a response can be a stream.
+    # The client's operation timeout still bounds every call.
+    timeout = httpx2.Timeout(30.0, read=300.0)
+    async with (
+        httpx2.AsyncClient(headers=dict(headers), timeout=timeout) as http_client,
+        streamable_http_client(url, http_client=http_client) as streams,
+    ):
+        yield streams

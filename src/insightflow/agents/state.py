@@ -3,9 +3,13 @@
 import operator
 from typing import Annotated, TypedDict
 
-from insightflow.agents.models import ConversationTurn, Route, VerificationResult
+from insightflow.agents.models import (
+    AgentAction,
+    ConversationTurn,
+    Observation,
+    VerificationResult,
+)
 from insightflow.providers.llm import ChatMessage
-from insightflow.rag.models import AssembledContext
 
 
 class AgentState(TypedDict, total=False):
@@ -18,12 +22,11 @@ class AgentState(TypedDict, total=False):
 
     history: Annotated[list[ConversationTurn], operator.add]
     query: str
-    route: Route | None
-    retrieval_query: str | None
-    retrieval_queries: list[str]
-    context: AssembledContext | None
+    observations: list[Observation]
+    pending_action: AgentAction | None
     answer: str
     verification: VerificationResult | None
+    feedback: list[str]
     attempt: int
     node_trace: list[str]
 
@@ -32,15 +35,20 @@ def new_turn_input(query: str) -> AgentState:
     """Return the graph input for a new turn, with every per-turn field reset."""
     return {
         "query": query,
-        "route": None,
-        "retrieval_query": None,
-        "retrieval_queries": [],
-        "context": None,
+        "observations": [],
+        "pending_action": None,
         "answer": "",
         "verification": None,
+        "feedback": [],
         "attempt": 1,
         "node_trace": [],
     }
+
+
+def attempt_observations(state: AgentState) -> list[Observation]:
+    """Return the observations made in the current attempt."""
+    attempt = state.get("attempt", 1)
+    return [item for item in state.get("observations", []) if item.attempt == attempt]
 
 
 def history_messages(state: AgentState, max_turns: int) -> list[ChatMessage]:
@@ -55,7 +63,7 @@ def history_messages(state: AgentState, max_turns: int) -> list[ChatMessage]:
 
 
 def render_history(state: AgentState, max_turns: int) -> str:
-    """Render recent turns as plain text for prompts that judge or rewrite a question."""
+    """Render recent turns as plain text for prompts that plan or judge."""
     if max_turns <= 0:
         return ""
     lines = [

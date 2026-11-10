@@ -50,12 +50,13 @@ async def test_stream_sends_node_token_and_final_events_in_order() -> None:
     assert content_type.startswith("text/event-stream")
     names = [name for name, _ in events]
     assert names == [
-        "node", "node", "token", "token", "token", "token", "token", "token", "node", "node",
-        "node", "final",
+        "node", "node", "node", "token", "token", "token", "token", "token", "token", "node",
+        "node", "node", "final",
     ]
     assert [data for name, data in events if name == "node"] == [
-        {"node": "route", "route": "retrieve"},
-        {"node": "retrieve", "passages": 1},
+        {"node": "agent", "action": "search_documents"},
+        {"node": "act", "tool": "search_documents", "status": "ok"},
+        {"node": "agent", "action": "answer"},
         {"node": "answer"},
         {"node": "verify", "status": "passed"},
         {"node": "finalize"},
@@ -65,7 +66,9 @@ async def test_stream_sends_node_token_and_final_events_in_order() -> None:
     final = events[-1][1]
     assert final["answer"] == text
     assert final["sources"][0]["chunk_id"] == "chunk-1"
-    assert final["metadata"]["nodes"] == ["route", "retrieve", "answer", "verify", "finalize"]
+    assert final["metadata"]["nodes"] == [
+        "agent", "act", "agent", "answer", "verify", "finalize"
+    ]
 
 
 async def test_stream_announces_retries_so_clients_can_discard_old_tokens() -> None:
@@ -129,7 +132,7 @@ async def test_stream_reports_storage_failures_as_an_error_event() -> None:
     _, _, events = await stream_query(application, {"query": "q"})
 
     assert events == [
-        ("node", {"node": "route", "route": "retrieve"}),
+        ("node", {"node": "agent", "action": "search_documents"}),
         (
             "error",
             {
