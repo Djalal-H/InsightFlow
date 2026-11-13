@@ -2,8 +2,8 @@
 
 ## Current status
 
-- Current stage: Stage 5 complete on `feature/stage5-mcp-tools` (ReAct agent with document search, calculator, and Tavily web search; verified with mocks, in-process servers, the real Tavily server, and the hosted model); Stage 6 not started
-- Last updated: 2026-11-10
+- Current stage: Stage 6 complete on `feature/stage6-retrieval-quality` (closed by the author's decision). Every retrieval-quality candidate is an option that is off by default; the embedding `input_type` fix is measured; the chat-backed options, reranking, and memory are verified with mocks only.
+- Last updated: 2026-11-13
 - Overall state: in progress
 
 ## Stage summary
@@ -15,7 +15,7 @@
 | Stage 3 | complete | Ingestion, Qdrant persistence, dense retrieval, and grounded answers with sources verified with mocks and on a real Qdrant server; a hosted-model run on `corpus/MD` was reported working by the author (2026-10-29) |
 | Stage 4 | in progress | Router, verifier, bounded retries, execution metadata, SQLite checkpointer with threads, and SSE streaming verified with mocks; no hosted-model run yet |
 | Stage 5 | complete | MCP client adapter with per-call controls, calculator MCP server, ReAct agent loop with document search as a tool, Tavily web search with web sources, and a tool server cooldown, verified with mocks and in-process servers; the opt-in Tavily test and three hosted-model queries passed (2026-11-10) |
-| Stage 6 | not started | —                                                                                                          |
+| Stage 6 | complete | All candidates implemented and verified with mocks and on a real Qdrant server. Measured on 48 labeled questions with hosted embeddings: the `input_type` fix raised the dense hit rate from 0.500 to 0.979; hybrid and neighbor expansion gave no gain after it. Closed by the author's decision with the chat-backed options, reranking, and memory not measured on hosted models |
 | Stage 7 | not started | —                                                                                                          |
 | Stage 8 | not started | —                                                                                                          |
 
@@ -395,3 +395,117 @@
   - Web content goes to the model without prompt-injection filtering (Stage 8, by the author's decision).
   - The verification retry path was not run against the hosted model; it is covered by mocked tests.
   - Optional plan work is not implemented: dynamic tool registration, auth propagation, result caching, and more MCP servers.
+
+### 2026-11-13 — Stage 6 retrieval-quality options and evaluation set
+
+- Stage: Stage 6
+- Status: in progress (code complete; measured in part, see the next entry)
+- Scope: Implemented every Stage 6 candidate as an option that is off by default, a labeled evaluation set for the sample corpus, and a command that compares retrieval configurations. Default behavior is unchanged: plain dense retrieval, the same agent prompt, and the same index fingerprint for dense-only indexes.
+- Changed:
+  - `src/insightflow/rag/sparse.py` — new: `Bm25SparseEncoder` (hashed terms, BM25 term weights, no model or vocabulary).
+  - `src/insightflow/rag/retrieval.py` — `HybridRetriever`, `renumber`; `DenseRetriever` passes `source_identifiers`.
+  - `src/insightflow/rag/query_expansion.py` — new: `QueryExpandingRetriever` (`multi_query`, `decompose`), `reciprocal_rank_fusion`.
+  - `src/insightflow/rag/corrective.py` — new: `CorrectiveRetriever` (grade, drop, one more search).
+  - `src/insightflow/rag/refinement.py` — new: `RefiningRetriever`, `Reranker`, `NeighborExpander`, `ContextCompressor`.
+  - `src/insightflow/rag/composition.py` — new: `build_retriever` from `RetrievalConfig`.
+  - `src/insightflow/rag/config.py`, `models.py`, `protocols.py` — `RetrievalConfig` options (the unused `expand_neighbors`, `max_neighbors_per_hit`, and `per_document_cap` were replaced), `SparseVector`, `RetrievalQuery.source_identifiers`, `CandidateProcessor`, `SparseEncoder`, `ChunkReader`; `ChunkStore` and `ChunkSearcher` accept sparse vectors.
+  - `src/insightflow/rag/ingestion.py`, `src/insightflow/ingest.py` — sparse vectors and a fingerprint part for the encoder, only in hybrid mode.
+  - `src/insightflow/storage/qdrant.py` — sparse vector with the IDF modifier, hybrid search (prefetch and RRF), source filter, `get_chunks`.
+  - `src/insightflow/storage/qdrant_memory.py`, `src/insightflow/agents/memory.py`, `src/insightflow/agents/nodes/recall.py`, `finalize.py`, `graph.py`, `state.py` — conversation memory, the optional `recall` node, `thread_id`, `search_scope`, and `recalled` in the state.
+  - `src/insightflow/providers/rerank.py` — new: `RerankProvider`, `LiteLLMRerankProvider`. `providers/structured.py` — moved from `agents/structured.py` (a re-export stays).
+  - `src/insightflow/agents/document_search.py`, `nodes/agent.py`, `nodes/act.py` — filter arguments, request scope, multi-hop hint.
+  - `src/insightflow/api/` — `QueryRequest.filters`, `metadata.recalled_turns`, `get_retriever` composition, `get_rerank_provider`, `get_conversation_memory`; `DELETE /threads/{id}` also deletes remembered turns.
+  - `src/insightflow/evaluation/retrieval.py`, `src/insightflow/evaluate.py`, `evaluation/retrieval_cases.jsonl` — new: scoring, the comparison command, and 48 labeled questions.
+  - `src/insightflow/core/config.py`, `.env.example`, `README.md`, `CLAUDE.md`, `docs/Implement Plan Draft.md` — settings and documentation.
+  - Tests: 11 new unit test files, additions to `tests/fakes.py`, `tests/integration/test_query_api.py`, and `tests/integration/test_qdrant_persistence.py`.
+- Validation:
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues in 73 source files
+  - `pytest -q -p no:cacheprovider` — passed: 482 passed, 4 skipped; coverage 95%
+  - `docker compose up -d qdrant`, then `QDRANT_TEST_URL=http://localhost:6333 pytest -m qdrant -q -p no:cacheprovider --no-cov` — passed: 3 passed (persistence, hybrid search with filters and chunk reads, conversation memory). Synthetic documents and fake embeddings; no hosted-model request.
+  - `git diff --check` — passed
+  - Evaluation labels: the sample corpus was parsed and chunked locally with the default parsers and `structure_recursive` settings (no hosted request), and every evidence text of the 48 cases was found in at least one chunk of its source (scratch script, not in the repository). The default suite checks that the set loads and that each source file exists.
+- Findings:
+  - The first server run of the hybrid test failed: with tied dense scores, rank fusion returned a document that was first in one ranking only, and the in-memory test passed by chance. `search_chunks` now reads each ranking to `max(2 × limit, 20)`, and the tests use a corpus in which dense search ranks the target second.
+  - Local chunking of the sample PDFs gives many small chunks (for example 42 chunks for 8,076 characters in the Computer Science catalog), because each heading starts a chunk. This is a reason to measure `RAG_NEIGHBORS_PER_HIT` first; it is not measured yet.
+- Decisions:
+  - Every option is off by default. The plan says to compare each addition on the evaluation set before it enters the default path, and no hosted comparison is recorded.
+  - Sparse vectors are computed in Python and Qdrant applies IDF, so hybrid retrieval adds no model download (FastEmbed stays out).
+  - Parent context uses the stored neighbor links, so the chunkers and existing indexes do not change. A parent-child hierarchy in the index is not implemented.
+  - Compression is extractive (sentence numbers), so the model cannot add text; an unreadable or empty selection keeps the passage.
+  - Memory failures are logged and do not fail a request; memory needs a checkpointer because it is per thread.
+  - An existing dense-only collection is refused in hybrid mode, not migrated.
+- Not verified:
+  - No hosted-model or hosted-reranker request was made. The scores of each option on the evaluation set, the JSON reliability of the expansion, grading, and compression prompts on the configured NVIDIA NIM model, the LiteLLM rerank call against a real provider, and real cost and latency are unknown.
+  - The agent's use of the filter arguments and of the multi-hop hint is tested with scripted replies only.
+- Remaining:
+  - Ingest the corpus in hybrid mode into a new collection and run `python -m insightflow.evaluate`; record the table here; then decide the defaults.
+  - Carried from Stage 5: a total context budget across the searches of one turn; the calculator rule in the agent prompt.
+
+### 2026-11-13 — Stage 6 measurement with hosted embeddings and the embedding input-type fix
+
+- Stage: Stage 6
+- Status: in progress
+- Scope: Ran the labeled comparison for the options that need embeddings only (approved by the author; no chat or rerank calls). The first run showed that dense retrieval was almost random. The cause was found and fixed, and the comparison was repeated.
+- Setup: local Qdrant (`docker compose up -d qdrant`), a new collection `insightflow_eval`, the sample corpus (50 documents, all `completed`), `structure_recursive` chunking with the default settings, embedding model `nvidia_nim/nvidia/nemotron-3-embed-1b` (2048 dimensions), `RAG_CANDIDATE_TOP_K=12`, `RAG_GENERATION_MAX_CHUNKS=6`, `evaluation/retrieval_cases.jsonl` (48 cases). The scores are for the passages in the assembled context.
+- Run 1 (no `input_type`, the behavior before this change):
+  - `RAG_RETRIEVAL_MODE=hybrid QDRANT_COLLECTION=insightflow_eval PYTHONPATH=src python -m insightflow.ingest corpus/` — 50 documents: 50 completed
+  - `QDRANT_COLLECTION=insightflow_eval PYTHONPATH=src python -m insightflow.evaluate --variants dense,hybrid,dense+neighbors,hybrid+neighbors --output <scratch>/scores.json`
+
+    | Variant | hit | recall | mrr | context tokens |
+    | --- | --- | --- | --- | --- |
+    | dense | 0.500 | 0.469 | 0.398 | 1818 |
+    | hybrid | 0.833 | 0.823 | 0.710 | 1940 |
+    | dense+neighbors | 0.500 | 0.490 | 0.415 | 3519 |
+    | hybrid+neighbors | 0.833 | 0.823 | 0.689 | 3688 |
+
+  - A probe of two missed questions showed dense scores between 0.80 and 0.83 for unrelated passages (for example a `TXT/dracula.txt` passage for a question about the meal allowance).
+- Cause: the embedding model is asymmetric, and `LiteLLMEmbeddingProvider` sent no `input_type`. Check with one question, its answer passage, and one unrelated passage (`<scratch>/input_type.py`, four embedding requests): without `input_type` the cosine similarity was 0.714 (relevant) and 0.746 (unrelated); with `query` and `passage` it was 0.456 and 0.005.
+- Changed:
+  - `src/insightflow/providers/embeddings.py` — `query_input_type` and `document_input_type`; `embed_query` no longer calls `embed_documents`.
+  - `src/insightflow/core/config.py`, `.env.example` — `EMBEDDING_QUERY_INPUT_TYPE`, `EMBEDDING_DOCUMENT_INPUT_TYPE` (empty by default: nothing is sent, as before).
+  - `src/insightflow/rag/config.py`, `src/insightflow/ingest.py` — `EmbeddingConfig.document_input_type` is part of the fingerprint only when set, so a change re-embeds the documents and older indexes keep their fingerprint.
+  - `src/insightflow/api/dependencies.py` — passes both types.
+  - Tests: `tests/unit/test_embedding_provider_contract.py`, `tests/unit/test_ingest_cli.py`.
+- Run 2 (`EMBEDDING_QUERY_INPUT_TYPE=query EMBEDDING_DOCUMENT_INPUT_TYPE=passage` for both commands; the ingestion embedded all 50 documents again because the fingerprint changed):
+
+    | Variant | hit | recall | mrr | context tokens |
+    | --- | --- | --- | --- | --- |
+    | dense | 0.979 | 0.979 | 0.915 | 1147 |
+    | hybrid | 0.979 | 0.958 | 0.924 | 1725 |
+    | dense+neighbors | 0.979 | 0.979 | 0.915 | 1624 |
+    | hybrid+neighbors | 0.979 | 0.958 | 0.913 | 3083 |
+
+  - Dense misses one case (`calendar-registrar-office`), which hybrid finds. Hybrid loses one labeled passage in three cases (`research-cii-projects`, `hop-health-center-hours`, `hop-insurance-and-work`).
+- Validation after the fix:
+  - `ruff check src tests` — passed; `mypy src` — passed: no issues in 73 source files
+  - `pytest -q -p no:cacheprovider --no-cov` — passed: 485 passed, 4 skipped
+- Decisions:
+  - Dense retrieval stays the default. After the fix, hybrid and neighbor expansion give no gain on this set, and neighbor expansion adds 40% to 80% more context tokens.
+  - The input types stay empty by default, because a symmetric model (for example OpenAI) does not accept them. `.env.example` explains when to set them.
+- Limits of this measurement:
+  - The set is almost solved by dense retrieval (47 of 48), so it can no longer separate the options. Harder cases are necessary before hybrid, neighbors, or reranking can be judged.
+  - One corpus, one embedding model, one chunking setup. The labels were written from the corpus by the assistant and were not reviewed by a second person.
+  - The scores measure retrieval, not answer quality.
+- Not verified: query expansion (`multi_query`, `decompose`), corrective retrieval, context compression, reranking, the multi-hop hint, the agent's filter arguments, and conversation memory on hosted models.
+- Remaining:
+  - The author's `.env` does not set the input types, so the running application still has the Run 1 behavior. Add `EMBEDDING_QUERY_INPUT_TYPE=query` and `EMBEDDING_DOCUMENT_INPUT_TYPE=passage`, then ingest again.
+  - Add harder evaluation cases; measure the chat-backed options and a reranker (billable chat and rerank calls).
+
+### 2026-11-13 — Stage 6 closed
+
+- Stage: Stage 6
+- Status: completed
+- Scope: Closed Stage 6 by the author's decision. Every candidate of the plan is implemented behind a setting that is off by default, a labeled evaluation set and a comparison command exist, and the one measured failure (missing embedding `input_type`) is fixed. No option was made a default, because the measurement gave no reason for it.
+- Validation (2026-11-13, before the closing commit):
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues in 73 source files
+  - `pytest -q -p no:cacheprovider` — passed: 485 passed, 4 skipped; coverage 95%
+  - `QDRANT_TEST_URL=http://localhost:6333 pytest -m qdrant -q -p no:cacheprovider --no-cov` — passed: 3 passed
+  - `git diff --check` — passed
+- Known limits carried forward:
+  - Query expansion, corrective retrieval, context compression, reranking, the multi-hop hint, the agent's filter arguments, and conversation memory are verified with mocks only; no hosted chat or rerank request was made for them.
+  - The evaluation set is almost solved by dense retrieval (47 of 48), so it cannot separate the options. Harder cases are necessary.
+  - The author's `.env` must set `EMBEDDING_QUERY_INPUT_TYPE=query` and `EMBEDDING_DOCUMENT_INPUT_TYPE=passage`, followed by a new ingestion.
+  - No parent-child hierarchy in the index, no language or date filters, no total context budget across the searches of one turn.
+  - `metadata.recalled_turns` and `QueryRequest.filters` are new API fields.

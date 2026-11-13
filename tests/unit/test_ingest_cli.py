@@ -58,6 +58,20 @@ def test_embedding_config_uses_the_qdrant_distance() -> None:
     assert config.distance == "dot"
 
 
+def test_document_input_type_changes_the_embedding_fingerprint_only_when_set() -> None:
+    plain = ingest.embedding_config_from_settings(make_settings(embedding_document_input_type=""))
+    blank = ingest.embedding_config_from_settings(
+        make_settings(embedding_document_input_type="  ")
+    )
+    typed = ingest.embedding_config_from_settings(
+        make_settings(embedding_document_input_type="passage")
+    )
+
+    assert plain.fingerprint == blank.fingerprint
+    assert not plain.fingerprint.endswith("passage")
+    assert typed.fingerprint == f"{plain.fingerprint}:input_type=passage"
+
+
 def test_main_prints_results_and_summary(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

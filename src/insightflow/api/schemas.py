@@ -17,10 +17,30 @@ ThreadId = Annotated[
 ]
 
 
+class QueryFilters(BaseModel):
+    """Metadata filters that limit every document search of the request."""
+
+    file_types: list[Literal["pdf", "docx", "md", "txt"]] | None = Field(
+        default=None, min_length=1, description="Search only documents of these file types."
+    )
+    sources: list[Annotated[str, StringConstraints(min_length=1, max_length=512)]] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=50,
+        description=(
+            "Search only these documents, by corpus-relative path as `source_identifier` "
+            "reports it, for example `PDF/student_handbook.pdf`."
+        ),
+    )
+
+
 class QueryRequest(BaseModel):
     """Request payload for POST /query and POST /query/stream."""
 
     query: str = Field(..., min_length=1, description="The user's natural-language question.")
+    filters: QueryFilters | None = Field(
+        default=None, description="Optional limits for document search. Web search ignores them."
+    )
     thread_id: ThreadId | None = Field(
         default=None,
         description=(
@@ -101,6 +121,9 @@ class ExecutionMetadata(BaseModel):
     )
     steps: list[StepReport] = Field(default_factory=list, description="Agent actions in order.")
     nodes: list[str] = Field(default_factory=list, description="Workflow nodes in run order.")
+    recalled_turns: int = Field(
+        0, ge=0, description="Older turns that conversation memory added to the prompts."
+    )
     duration_ms: int = Field(..., ge=0)
 
 

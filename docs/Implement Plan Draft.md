@@ -120,6 +120,27 @@ Local SentenceTransformers, FastEmbed, cross-encoders, or other downloaded model
 default architecture. Reranking and summarization should use hosted APIs unless this policy is
 explicitly revisited.
 
+Implementation (2026-11-13): every candidate is implemented as an option that is off by default,
+with a labeled evaluation set (`evaluation/retrieval_cases.jsonl`, 48 questions on the sample
+corpus) and a comparison command (`python -m insightflow.evaluate`). No option becomes a default
+until its scores on that set are recorded in `docs/progress/PROGRESS.md`.
+
+| Candidate | Implementation |
+| --- | --- |
+| Query rewriting | `RAG_QUERY_EXPANSION=multi_query`: model-written wordings, concurrent search, rank fusion |
+| Metadata filters | Request `filters` (file types, sources); optional agent tool arguments |
+| Hybrid dense/sparse | `RAG_RETRIEVAL_MODE=hybrid`: hashed BM25 sparse vectors computed in Python, Qdrant IDF and RRF |
+| Parent-child context | `RAG_NEIGHBORS_PER_HIT`: neighboring chunks are added to a hit through the stored chunk links; the chunkers and the index do not change |
+| API-backed reranking | `LITELLM_RERANK_MODEL` through LiteLLM's rerank API |
+| Context compression | `RAG_CONTEXT_COMPRESSION_ENABLED`: extractive sentence selection by the chat model |
+| Corrective retrieval | `RAG_CORRECTIVE_RETRIEVAL_ENABLED`: relevance grading, and one more search with a new query |
+| Multi-hop queries | `RAG_QUERY_EXPANSION=decompose` for independent facts; `AGENT_MULTI_HOP_ENABLED` for dependent facts in the ReAct loop |
+| Conversation memory | `MEMORY_ENABLED`: embedded turns in a Qdrant collection, recalled by similarity per thread |
+
+Not done in this stage: a parent-child chunk hierarchy in the index (`parent_chunk_id` stays
+unused), language and date filters, a total context budget across the searches of one turn, and
+answer-quality evaluation (Stage 7).
+
 ## Stage 7: Observability, evaluation, and reliability
 
 **Goal:** Make execution quality and operational failures visible.

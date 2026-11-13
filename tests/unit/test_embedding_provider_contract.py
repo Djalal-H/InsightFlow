@@ -150,3 +150,35 @@ async def test_embedding_provider_maps_litellm_errors(
         await provider.embed_documents(["document"])
 
     assert "secret" not in str(error.value)
+
+
+async def test_input_types_are_sent_for_asymmetric_models() -> None:
+    provider = LiteLLMEmbeddingProvider(
+        "hosted/test-embedding", query_input_type=" query ", document_input_type="passage"
+    )
+    response = SimpleNamespace(data=[{"embedding": [0.1]}])
+
+    with patch(
+        "insightflow.providers.embeddings.aembedding", AsyncMock(return_value=response)
+    ) as embedding:
+        await provider.embed_query("question")
+        await provider.embed_documents(["passage text"])
+
+    assert [call.kwargs for call in embedding.await_args_list] == [
+        {"model": "hosted/test-embedding", "input": ["question"], "input_type": "query"},
+        {"model": "hosted/test-embedding", "input": ["passage text"], "input_type": "passage"},
+    ]
+
+
+async def test_blank_input_types_are_not_sent() -> None:
+    provider = LiteLLMEmbeddingProvider(
+        "hosted/test-embedding", query_input_type="", document_input_type="  "
+    )
+    response = SimpleNamespace(data=[{"embedding": [0.1]}])
+
+    with patch(
+        "insightflow.providers.embeddings.aembedding", AsyncMock(return_value=response)
+    ) as embedding:
+        await provider.embed_query("question")
+
+    embedding.assert_awaited_once_with(model="hosted/test-embedding", input=["question"])

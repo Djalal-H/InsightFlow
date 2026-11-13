@@ -23,6 +23,7 @@ TAVILY_TEST_API_KEY=tvly-... pytest -m tavily            # opt-in, one billable 
 
 docker compose up -d qdrant   # only when a workflow needs a real vector store
 uvicorn insightflow.main:app --app-dir src --reload
+PYTHONPATH=src python -m insightflow.evaluate --variants dense,hybrid   # billable retrieval comparison
 PYTHONPATH=src python scripts/manual_chat_test.py "prompt"   # real provider call (billable)
 ```
 
@@ -61,6 +62,34 @@ Flow: `DocumentSource` → `DocumentParser` → `NormalizedDocument` (ordered
 - `rag/retrieval.py`: `DenseRetriever` (query embedding → `ChunkSearcher.search_chunks`) and
   `BudgetedContextAssembler` (rank-ordered passages within chunk/token limits, rendered as `[n]`).
 
+### Retrieval quality (Stage 6)
+
+Every technique is off by default (`RAG_*`, `LITELLM_RERANK_MODEL`, `AGENT_MULTI_HOP_ENABLED`,
+`MEMORY_ENABLED`); keep it so until it is measured with `insightflow.evaluate`.
+
+- `rag/composition.py:build_retriever` builds the chain from `RetrievalConfig`
+  (`api/dependencies.py:retrieval_config_from_settings`): `DenseRetriever`/`HybridRetriever` →
+  `QueryExpandingRetriever` (`multi_query`/`decompose`, RRF) → `Reranker` → `CorrectiveRetriever`
+  → `NeighborExpander` → `ContextCompressor`. All are `Retriever`s or `CandidateProcessor`s
+  (`rag/refinement.py:RefiningRetriever`), so the agent layer does not change.
+- Chat-backed steps use `providers/structured.py:complete_json` (moved from `agents/`; a
+  re-export stays). Unreadable JSON must leave the candidates unchanged; keep that fallback.
+- Hybrid: `rag/sparse.py:Bm25SparseEncoder` (hashed terms, no model). Ingestion writes sparse
+  vectors only when `RAG_RETRIEVAL_MODE=hybrid`, and only then does the index fingerprint
+  include the encoder, so dense-only indexes stay valid. `QdrantStore.search_chunks` fuses with
+  RRF and reads each ranking deeper than `limit`. A dense-only collection is refused.
+- `providers/rerank.py`: `RerankProvider` and the LiteLLM adapter (`arerank`).
+- Filters: `QueryRequest.filters` becomes `AgentState.search_scope`, which `act` passes to
+  `DocumentSearch.search`; with `RAG_SEARCH_FILTERS_ENABLED` the tool spec
+  (`document_search.search_spec`) also has `file_types` and `sources`, which only narrow the scope.
+- Memory: `agents/memory.py:ConversationMemory` over `storage/qdrant_memory.py`. With memory, the
+  graph is `START → recall → agent …` and `make_finalize_node` stores the turn. Recalled turns
+  are only those older than the `AGENT_HISTORY_TURNS` window; `state.prompt_turns` puts them
+  before the recent turns. Memory failures are logged, never raised. `thread_id` is in the
+  state (`new_turn_input`), and memory is ignored without a checkpointer.
+- `evaluation/retrieval.py` and `insightflow/evaluate.py`: scores of the assembled context on
+  `evaluation/retrieval_cases.jsonl` (labels are source + evidence text, not chunk ids).
+
 ### Query workflow (ReAct, Stages 4–5)
 
 `api/routes/query.py` serves `POST /query` and `POST /query/stream` (SSE, FastAPI's native
@@ -93,10 +122,10 @@ model.
 
 API tests override `get_settings`, `get_chat_provider`, `get_retriever`, `get_context_assembler`,
 `get_checkpointer`, and (for tool tests) `get_tool_set`; without these overrides the route opens
-a real Qdrant client.
+a real Qdrant client. Memory tests override `get_conversation_memory`.
 `httpx.ASGITransport` does not run the lifespan, so requests are stateless unless
 `get_checkpointer` is overridden. `tests/fakes.py:ScriptedChatProvider` replies per workflow role
-(agent, answer, direct, judge); its default agent reply is unparseable, so an unscripted run is
+(agent, answer, direct, judge, and the retrieval roles expand, grade, compress); its default agent reply is unparseable, so an unscripted run is
 `agent, act, agent, answer, verify, finalize`. Script steps with `search()`, `action()`, `ANSWER`. LiteLLM loads `.env` into `os.environ` on import, so
 `Settings(_env_file=None)` still sees `.env` values: pass values explicitly when a test depends
 on them.
@@ -127,6 +156,9 @@ so transports are passed as factories (`lambda: http_transport(url, headers)`).
 ### Other layers
 
 - `providers/`: `ChatProvider` / `EmbeddingProvider` protocols with LiteLLM adapters.
+  `EMBEDDING_QUERY_INPUT_TYPE` / `EMBEDDING_DOCUMENT_INPUT_TYPE` set the `input_type` that
+  asymmetric embedding models need (NVIDIA NIM: `query`/`passage`); without them dense retrieval
+  on such a model is almost random (measured, see `docs/progress/PROGRESS.md` 2026-11-13).
 - `core/config.py`: pydantic-settings `Settings` (loaded from `.env`; see `.env.example`).
 - `corpus/` holds sample DOCX/MD/PDF/TXT documents used for parser/chunker work.
 

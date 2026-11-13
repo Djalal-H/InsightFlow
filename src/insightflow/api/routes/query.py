@@ -7,18 +7,24 @@ from typing import Any, cast
 from fastapi import APIRouter
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
-from insightflow.agents.state import AgentState, new_turn_input
+from insightflow.agents.state import AgentState
 from insightflow.api.dependencies import (
     ChatProviderDependency,
     CheckpointerDependency,
     ContextAssemblerDependency,
+    ConversationMemoryDependency,
     RetrieverDependency,
     SettingsDependency,
     ToolSetDependency,
 )
 from insightflow.api.errors import describe_error
 from insightflow.api.schemas import ErrorResponse, QueryRequest, QueryResponse
-from insightflow.api.workflow import build_workflow, resolve_thread, to_query_response
+from insightflow.api.workflow import (
+    build_workflow,
+    resolve_thread,
+    to_query_response,
+    turn_input,
+)
 from insightflow.core.exceptions import InsightFlowError
 
 router = APIRouter(tags=["query"])
@@ -47,15 +53,16 @@ async def query(
     settings: SettingsDependency,
     checkpointer: CheckpointerDependency,
     tools: ToolSetDependency,
+    memory: ConversationMemoryDependency,
 ) -> QueryResponse:
     """Let the agent search documents and call tools, then answer, verify, and cite sources."""
     started = time.perf_counter()
     thread_id, config = resolve_thread(request.thread_id, checkpointer, settings)
     graph = build_workflow(
-        settings, chat_provider, retriever, assembler, checkpointer, tools=tools
+        settings, chat_provider, retriever, assembler, checkpointer, tools=tools, memory=memory
     )
 
-    result = cast(AgentState, await graph.ainvoke(new_turn_input(request.query), config))
+    result = cast(AgentState, await graph.ainvoke(turn_input(request, thread_id), config))
 
     return to_query_response(result, thread_id=thread_id, duration_ms=elapsed_ms(started))
 
@@ -73,6 +80,8 @@ def node_event(node: str, update: AgentState) -> dict[str, Any]:
     elif node == "verify" and update.get("verification") is not None:
         verification = update["verification"]
         data["status"] = verification.status if verification is not None else None
+    elif node == "recall":
+        data["recalled_turns"] = len(update.get("recalled", []))
     elif node == "retry" and "attempt" in update:
         data["attempt"] = update["attempt"]
     return data
@@ -100,6 +109,7 @@ async def query_stream(
     settings: SettingsDependency,
     checkpointer: CheckpointerDependency,
     tools: ToolSetDependency,
+    memory: ConversationMemoryDependency,
 ) -> AsyncIterator[ServerSentEvent]:
     """Run the same workflow as POST /query and stream its progress and answer tokens."""
     started = time.perf_counter()
@@ -111,13 +121,14 @@ async def query_stream(
         assembler,
         checkpointer,
         tools=tools,
+        memory=memory,
         stream_tokens=True,
     )
 
     final_state: AgentState = {}
     try:
         async for mode, chunk in graph.astream(
-            new_turn_input(request.query),
+            turn_input(request, thread_id),
             config,
             stream_mode=["updates", "custom", "values"],
         ):

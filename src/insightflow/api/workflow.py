@@ -8,11 +8,13 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from insightflow.agents.checkpoint import thread_config
 from insightflow.agents.document_search import DocumentSearch
 from insightflow.agents.graph import AgentGraph, WorkflowNodes, build_graph, recursion_limit
+from insightflow.agents.memory import ConversationMemory
 from insightflow.agents.models import SEARCH_TOOL
 from insightflow.agents.nodes.act import make_act_node
 from insightflow.agents.nodes.agent import make_agent_node
 from insightflow.agents.nodes.answer import make_answer_node
-from insightflow.agents.nodes.finalize import finalize_node
+from insightflow.agents.nodes.finalize import make_finalize_node
+from insightflow.agents.nodes.recall import make_recall_node
 from insightflow.agents.nodes.retry import retry_node
 from insightflow.agents.nodes.verify import make_verify_node
 from insightflow.agents.observations import (
@@ -21,9 +23,10 @@ from insightflow.agents.observations import (
     observation_keys,
     source_key,
 )
-from insightflow.agents.state import AgentState
+from insightflow.agents.state import AgentState, new_turn_input
 from insightflow.api.schemas import (
     ExecutionMetadata,
+    QueryRequest,
     QueryResponse,
     Source,
     SourceReference,
@@ -46,9 +49,15 @@ def build_workflow(
     checkpointer: BaseCheckpointSaver[str] | None,
     *,
     tools: ToolSet | None = None,
+    memory: ConversationMemory | None = None,
     stream_tokens: bool = False,
 ) -> AgentGraph:
-    """Build the ReAct workflow for one request."""
+    """Build the ReAct workflow for one request.
+
+    Conversation memory needs a thread, so `memory` is ignored without a checkpointer.
+    """
+    if checkpointer is None:
+        memory = None
     tool_set = tools if tools is not None else ToolSet()
     search = DocumentSearch(
         retriever,
@@ -58,6 +67,7 @@ def build_workflow(
             max_tokens=settings.rag_context_token_budget,
             max_chunks=settings.rag_generation_max_chunks,
         ),
+        filters_enabled=settings.rag_search_filters_enabled,
     )
     nodes = WorkflowNodes(
         agent=make_agent_node(
@@ -65,6 +75,8 @@ def build_workflow(
             tool_set,
             max_steps=settings.agent_max_steps,
             history_turns=settings.agent_history_turns,
+            search_spec=search.spec,
+            multi_hop=settings.agent_multi_hop_enabled,
         ),
         act=make_act_node(search, tool_set),
         answer=make_answer_node(
@@ -76,7 +88,12 @@ def build_workflow(
             chat_provider if settings.agent_verifier_llm_enabled else None
         ),
         retry=retry_node,
-        finalize=finalize_node,
+        finalize=make_finalize_node(memory),
+        recall=(
+            make_recall_node(memory, history_turns=settings.agent_history_turns)
+            if memory is not None
+            else None
+        ),
     )
     return build_graph(nodes, max_attempts=settings.agent_max_attempts, checkpointer=checkpointer)
 
@@ -92,6 +109,17 @@ def resolve_thread(
         return None, {"recursion_limit": limit}
     thread_id = requested or uuid.uuid4().hex
     return thread_id, {**thread_config(thread_id), "recursion_limit": limit}
+
+
+def turn_input(request: QueryRequest, thread_id: str | None) -> AgentState:
+    """Return the graph input for a request, with its document filters as the search scope."""
+    scope: dict[str, list[str]] = {}
+    if request.filters is not None:
+        if request.filters.file_types:
+            scope["file_types"] = list(dict.fromkeys(request.filters.file_types))
+        if request.filters.sources:
+            scope["sources"] = list(dict.fromkeys(request.filters.sources))
+    return new_turn_input(request.query, thread_id=thread_id, search_scope=scope)
 
 
 def to_query_response(
@@ -139,6 +167,7 @@ def to_query_response(
             ],
             steps=steps,
             nodes=state.get("node_trace", []),
+            recalled_turns=len(state.get("recalled", [])),
             duration_ms=duration_ms,
         ),
     )

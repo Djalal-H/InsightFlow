@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Path, Response, status
 
 from insightflow.agents.checkpoint import read_thread_history
-from insightflow.api.dependencies import CheckpointerDependency
+from insightflow.api.dependencies import CheckpointerDependency, ConversationMemoryDependency
 from insightflow.api.schemas import ConversationTurnResponse, ErrorResponse, ThreadResponse
 from insightflow.core.exceptions import ThreadNotFoundError
 
@@ -44,8 +44,15 @@ async def get_thread(
     response_class=Response,
     responses=NOT_FOUND,
 )
-async def delete_thread(thread_id: ThreadIdPath, checkpointer: CheckpointerDependency) -> None:
-    """Delete every stored checkpoint of a conversation thread."""
+async def delete_thread(
+    thread_id: ThreadIdPath,
+    checkpointer: CheckpointerDependency,
+    memory: ConversationMemoryDependency,
+) -> None:
+    """Delete every stored checkpoint and remembered turn of a conversation thread."""
     if checkpointer is None or await read_thread_history(checkpointer, thread_id) is None:
         raise ThreadNotFoundError
+    if memory is not None:
+        # Memory first: if it fails, the thread still exists and the delete can be repeated.
+        await memory.forget(thread_id)
     await checkpointer.adelete_thread(thread_id)

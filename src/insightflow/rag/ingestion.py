@@ -27,6 +27,7 @@ from insightflow.rag.protocols import (
     Chunker,
     ChunkStore,
     DocumentParser,
+    SparseEncoder,
 )
 
 UNKNOWN_MIME_TYPE = "application/octet-stream"
@@ -100,6 +101,7 @@ class IngestionPipeline:
         embedding_config: EmbeddingConfig,
         store: ChunkStore,
         ingestion_config: IngestionConfig | None = None,
+        sparse_encoder: SparseEncoder | None = None,
     ) -> None:
         if chunking_config.strategy != chunker.strategy_name:
             raise ValueError("chunker does not implement the configured chunking strategy")
@@ -110,11 +112,14 @@ class IngestionPipeline:
         self._embedding_config = embedding_config
         self._store = store
         self._ingestion_config = ingestion_config or IngestionConfig()
+        self._sparse_encoder = sparse_encoder
 
     async def ingest_corpus(self, corpus_dir: Path) -> list[IngestionResult]:
         """Prepare the collection, then ingest every source sequentially in stable order."""
         sources = discover_sources(corpus_dir)
-        await self._store.ensure_collection(self._embedding_config)
+        await self._store.ensure_collection(
+            self._embedding_config, sparse=self._sparse_encoder is not None
+        )
         return [await self.ingest_document(source) for source in sources]
 
     async def ingest_document(self, source: DocumentSource) -> IngestionResult:
@@ -128,7 +133,11 @@ class IngestionPipeline:
             return _rejected(source, exc.reason)
 
         fingerprint = create_index_fingerprint(
-            document, self._chunker, self._chunking_config, self._embedding_config
+            document,
+            self._chunker,
+            self._chunking_config,
+            self._embedding_config,
+            sparse_encoder=self._sparse_encoder,
         )
         if not self._ingestion_config.force and await self._store.has_document_version(
             document.document_id, document.document_version, fingerprint
@@ -140,7 +149,17 @@ class IngestionPipeline:
             return _rejected(source, "empty_document")
         _ensure_chunks_belong_to(document, chunks)
         vectors = await self._embed(chunks)
-        await self._store.replace_document(document, chunks, vectors, fingerprint)
+        sparse_vectors = (
+            [
+                self._sparse_encoder.encode_document(chunk.search_text or chunk.embedding_text)
+                for chunk in chunks
+            ]
+            if self._sparse_encoder is not None
+            else None
+        )
+        await self._store.replace_document(
+            document, chunks, vectors, fingerprint, sparse_vectors=sparse_vectors
+        )
         return _identified(source, document, "completed", chunk_count=len(chunks))
 
     async def _embed(self, chunks: Sequence[Chunk]) -> list[list[float]]:
@@ -165,14 +184,22 @@ def create_index_fingerprint(
     chunker: Chunker,
     chunking_config: ChunkingConfig,
     embedding_config: EmbeddingConfig,
+    *,
+    sparse_encoder: SparseEncoder | None = None,
 ) -> str:
-    """Identify every setting that changes a document's stored chunks or vectors."""
-    parts = (
+    """Identify every setting that changes a document's stored chunks or vectors.
+
+    Without a sparse encoder the fingerprint is the same as before hybrid retrieval existed,
+    so dense-only indexes stay valid.
+    """
+    parts: tuple[str, ...] = (
         f"parser:{document.parser_name}:{document.parser_version}",
         f"chunker:{chunker.strategy_name}:{chunker.strategy_version}",
         f"chunking:{chunking_config.model_dump_json()}",
         f"embedding:{embedding_config.fingerprint}",
     )
+    if sparse_encoder is not None:
+        parts += (f"sparse:{sparse_encoder.fingerprint}",)
     return sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
