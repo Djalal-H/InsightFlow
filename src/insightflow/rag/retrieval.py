@@ -1,4 +1,4 @@
-"""Dense retrieval and budgeted context assembly over stored chunks."""
+"""Dense and hybrid retrieval, and budgeted context assembly over stored chunks."""
 
 from collections.abc import Callable
 
@@ -8,8 +8,9 @@ from insightflow.rag.models import (
     ContextBudget,
     RetrievalQuery,
     RetrievedChunk,
+    SparseVector,
 )
-from insightflow.rag.protocols import ChunkSearcher, ContextAssembler, Retriever
+from insightflow.rag.protocols import ChunkSearcher, ContextAssembler, Retriever, SparseEncoder
 
 
 class DenseRetriever:
@@ -27,7 +28,7 @@ class DenseRetriever:
         self._score_threshold = score_threshold
 
     async def retrieve(self, query: RetrievalQuery) -> list[RetrievedChunk]:
-        """Return up to `top_k` chunks, honoring document and source-type filters."""
+        """Return up to `top_k` chunks, honoring document, source, and source-type filters."""
         if query.languages or query.date_from or query.date_to:
             raise ValueError("language and date filters are not supported by stored chunks")
         vector = await self._embedding_provider.embed_query(query.text)
@@ -36,8 +37,43 @@ class DenseRetriever:
             limit=query.top_k,
             document_ids=query.document_ids,
             mime_types=query.source_types,
+            source_identifiers=query.source_identifiers,
             score_threshold=self._score_threshold,
+            sparse_vector=self._sparse_vector(query.text),
         )
+
+    def _sparse_vector(self, text: str) -> SparseVector | None:
+        return None
+
+
+class HybridRetriever(DenseRetriever):
+    """Fuse the dense ranking with a lexical ranking over stored sparse vectors.
+
+    The collection must hold sparse vectors written by the same encoder (ingest with
+    `RAG_RETRIEVAL_MODE=hybrid`). The scores are fusion scores, not similarities.
+    """
+
+    def __init__(
+        self,
+        embedding_provider: EmbeddingProvider,
+        searcher: ChunkSearcher,
+        sparse_encoder: SparseEncoder,
+        *,
+        score_threshold: float | None = None,
+    ) -> None:
+        super().__init__(embedding_provider, searcher, score_threshold=score_threshold)
+        self._sparse_encoder = sparse_encoder
+
+    def _sparse_vector(self, text: str) -> SparseVector | None:
+        return self._sparse_encoder.encode_query(text)
+
+
+def renumber(candidates: list[RetrievedChunk]) -> list[RetrievedChunk]:
+    """Return the candidates in their given order with ranks 1..n."""
+    return [
+        candidate if candidate.rank == rank else candidate.model_copy(update={"rank": rank})
+        for rank, candidate in enumerate(candidates, start=1)
+    ]
 
 
 def render_context_block(citation: int, candidate: RetrievedChunk) -> str:
@@ -98,8 +134,10 @@ __all__ = [
     "ContextAssembler",
     "ContextBudget",
     "DenseRetriever",
+    "HybridRetriever",
     "RetrievalQuery",
     "RetrievedChunk",
     "Retriever",
     "render_context_block",
+    "renumber",
 ]

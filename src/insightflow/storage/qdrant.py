@@ -8,7 +8,7 @@ from qdrant_client import AsyncQdrantClient, models
 from insightflow.core.config import Settings
 from insightflow.core.exceptions import StorageError
 from insightflow.rag.config import DistanceMetric, EmbeddingConfig
-from insightflow.rag.models import Chunk, NormalizedDocument, RetrievedChunk
+from insightflow.rag.models import Chunk, NormalizedDocument, RetrievedChunk, SparseVector
 
 _DISTANCES: dict[DistanceMetric, models.Distance] = {
     "cosine": models.Distance.COSINE,
@@ -16,6 +16,7 @@ _DISTANCES: dict[DistanceMetric, models.Distance] = {
     "euclid": models.Distance.EUCLID,
     "manhattan": models.Distance.MANHATTAN,
 }
+_MIN_HYBRID_PREFETCH = 20
 _INDEXED_KEYWORD_FIELDS = (
     "document_id",
     "document_version",
@@ -54,6 +55,10 @@ def payload_to_chunk(payload: dict[str, Any]) -> Chunk:
     )
 
 
+def _to_qdrant_sparse(vector: SparseVector) -> models.SparseVector:
+    return models.SparseVector(indices=list(vector.indices), values=list(vector.values))
+
+
 def _match(key: str, value: str) -> models.FieldCondition:
     return models.FieldCondition(key=key, match=models.MatchValue(value=value))
 
@@ -64,6 +69,7 @@ class QdrantStore:
     def __init__(self, settings: Settings, *, client: AsyncQdrantClient | None = None) -> None:
         self.collection_name = settings.qdrant_collection
         self.vector_name = settings.qdrant_vector_name
+        self.sparse_vector_name = settings.qdrant_sparse_vector_name
         self._upload_batch_size = settings.rag_upload_batch_size
         self._client = client or AsyncQdrantClient(
             url=settings.qdrant_url,
@@ -78,8 +84,14 @@ class QdrantStore:
             return False
         return True
 
-    async def ensure_collection(self, embedding: EmbeddingConfig) -> None:
-        """Create the collection, or verify that its vectors match the embedding model."""
+    async def ensure_collection(
+        self, embedding: EmbeddingConfig, *, sparse: bool = False
+    ) -> None:
+        """Create the collection, or verify that its vectors match the embedding model.
+
+        With `sparse`, the collection also gets a sparse vector for hybrid search. An existing
+        collection without it is refused, not migrated.
+        """
         distance = _DISTANCES[embedding.distance]
         try:
             exists = await self._client.collection_exists(self.collection_name)
@@ -93,6 +105,15 @@ class QdrantStore:
                             size=embedding.dimensions, distance=distance
                         )
                     },
+                    sparse_vectors_config=(
+                        {
+                            self.sparse_vector_name: models.SparseVectorParams(
+                                modifier=models.Modifier.IDF
+                            )
+                        }
+                        if sparse
+                        else None
+                    ),
                 )
                 for field_name in _INDEXED_KEYWORD_FIELDS:
                     await self._client.create_payload_index(
@@ -109,6 +130,11 @@ class QdrantStore:
         if params is None or params.size != embedding.dimensions or params.distance != distance:
             raise StorageError(
                 "The Qdrant collection vectors do not match the configured embedding model"
+            )
+        if sparse and self.sparse_vector_name not in (info.config.params.sparse_vectors or {}):
+            raise StorageError(
+                "The Qdrant collection has no sparse vectors; hybrid retrieval needs a new "
+                "collection"
             )
 
     async def has_document_version(
@@ -149,14 +175,20 @@ class QdrantStore:
         chunks: Sequence[Chunk],
         vectors: Sequence[Sequence[float]],
         index_fingerprint: str,
+        *,
+        sparse_vectors: Sequence[SparseVector] | None = None,
     ) -> None:
         """Delete every other point of the document, then write the new chunks."""
         if len(chunks) != len(vectors):
             raise ValueError("chunks and vectors must have equal lengths")
+        if sparse_vectors is not None and len(sparse_vectors) != len(chunks):
+            raise ValueError("chunks and sparse vectors must have equal lengths")
         points = [
             models.PointStruct(
                 id=chunk.chunk_id,
-                vector={self.vector_name: list(vector)},
+                vector=self._point_vectors(
+                    vector, sparse_vectors[index] if sparse_vectors is not None else None
+                ),
                 payload=chunk_to_payload(
                     document,
                     chunk,
@@ -164,7 +196,7 @@ class QdrantStore:
                     document_chunk_count=len(chunks),
                 ),
             )
-            for chunk, vector in zip(chunks, vectors, strict=True)
+            for index, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
         ]
         # Deleting first means an interrupted write leaves an incomplete version, which
         # `has_document_version` reports as missing, so the next run rewrites it.
@@ -187,6 +219,14 @@ class QdrantStore:
         except Exception as exc:
             raise StorageError("Qdrant document write failed") from exc
 
+    def _point_vectors(
+        self, vector: Sequence[float], sparse_vector: SparseVector | None
+    ) -> dict[str, Any]:
+        vectors: dict[str, Any] = {self.vector_name: list(vector)}
+        if sparse_vector is not None:
+            vectors[self.sparse_vector_name] = _to_qdrant_sparse(sparse_vector)
+        return vectors
+
     async def search_chunks(
         self,
         vector: Sequence[float],
@@ -194,24 +234,61 @@ class QdrantStore:
         limit: int,
         document_ids: Sequence[str] | None = None,
         mime_types: Sequence[str] | None = None,
+        source_identifiers: Sequence[str] | None = None,
         score_threshold: float | None = None,
+        sparse_vector: SparseVector | None = None,
     ) -> list[RetrievedChunk]:
-        """Return the closest stored chunks, ranked from 1, with their source identity."""
+        """Return the closest stored chunks, ranked from 1, with their source identity.
+
+        With a non-empty `sparse_vector`, the dense and the lexical rankings are fused with
+        reciprocal rank fusion; the score is then a fusion score, and `score_threshold` applies
+        to the dense ranking only. Each ranking is read deeper than `limit`, so that a chunk
+        that is good in both can pass a chunk that is first in only one.
+        """
         conditions: list[models.Condition] = [
             models.FieldCondition(key=key, match=models.MatchAny(any=list(values)))
-            for key, values in (("document_id", document_ids), ("mime_type", mime_types))
+            for key, values in (
+                ("document_id", document_ids),
+                ("mime_type", mime_types),
+                ("source_identifier", source_identifiers),
+            )
             if values
         ]
+        query_filter = models.Filter(must=conditions) if conditions else None
         try:
-            result = await self._client.query_points(
-                collection_name=self.collection_name,
-                query=list(vector),
-                using=self.vector_name,
-                query_filter=models.Filter(must=conditions) if conditions else None,
-                limit=limit,
-                score_threshold=score_threshold,
-                with_payload=True,
-            )
+            if sparse_vector is not None and sparse_vector.indices:
+                depth = max(2 * limit, _MIN_HYBRID_PREFETCH)
+                result = await self._client.query_points(
+                    collection_name=self.collection_name,
+                    prefetch=[
+                        models.Prefetch(
+                            query=list(vector),
+                            using=self.vector_name,
+                            filter=query_filter,
+                            limit=depth,
+                            score_threshold=score_threshold,
+                        ),
+                        models.Prefetch(
+                            query=_to_qdrant_sparse(sparse_vector),
+                            using=self.sparse_vector_name,
+                            filter=query_filter,
+                            limit=depth,
+                        ),
+                    ],
+                    query=models.FusionQuery(fusion=models.Fusion.RRF),
+                    limit=limit,
+                    with_payload=True,
+                )
+            else:
+                result = await self._client.query_points(
+                    collection_name=self.collection_name,
+                    query=list(vector),
+                    using=self.vector_name,
+                    query_filter=query_filter,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    with_payload=True,
+                )
         except Exception as exc:
             raise StorageError("Qdrant search failed") from exc
         return [
@@ -224,6 +301,20 @@ class QdrantStore:
             )
             for rank, point in enumerate(result.points, start=1)
         ]
+
+    async def get_chunks(self, chunk_ids: Sequence[str]) -> list[Chunk]:
+        """Return the stored chunks with these identifiers; unknown ones are left out."""
+        if not chunk_ids:
+            return []
+        try:
+            records = await self._client.retrieve(
+                collection_name=self.collection_name,
+                ids=list(chunk_ids),
+                with_payload=True,
+            )
+        except Exception as exc:
+            raise StorageError("Qdrant chunk lookup failed") from exc
+        return [payload_to_chunk(record.payload) for record in records if record.payload]
 
     async def close(self) -> None:
         """Release client network resources."""

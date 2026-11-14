@@ -9,12 +9,14 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 from insightflow.agents.checkpoint import create_checkpoint_serializer
+from insightflow.agents.memory import ConversationMemory, RememberedTurn
 from insightflow.agents.nodes.agent import AGENT_SYSTEM_PROMPT
 from insightflow.agents.nodes.answer import GROUNDED_SYSTEM_PROMPT, NO_CONTEXT_ANSWER
 from insightflow.api.dependencies import (
     get_chat_provider,
     get_checkpointer,
     get_context_assembler,
+    get_conversation_memory,
     get_retriever,
 )
 from insightflow.core.config import Settings, get_settings
@@ -189,6 +191,7 @@ async def test_query_answers_from_retrieved_context_with_sources() -> None:
                 }
             ],
             "nodes": DEFAULT_NODES,
+            "recalled_turns": 0,
         },
         "sources": [
             {
@@ -467,3 +470,125 @@ async def test_thread_can_be_deleted() -> None:
 
     assert deleted.status_code == 204
     assert read.status_code == 404
+
+
+# --- Stage 6: request filters and conversation memory ----------------------------------------
+
+
+async def test_query_filters_limit_document_search() -> None:
+    retriever = FakeRetriever([make_candidate()])
+    application = make_app(FakeChatProvider(), retriever)
+
+    async with client_for(application) as client:
+        response = await client.post(
+            "/query",
+            json={
+                "query": "What is InsightFlow?",
+                "filters": {"file_types": ["pdf", "pdf"], "sources": ["PDF/overview.pdf"]},
+            },
+        )
+
+    assert response.status_code == 200
+    [query] = retriever.queries
+    assert query.source_types == ["application/pdf", "application/x-pdf"]
+    assert query.source_identifiers == ["PDF/overview.pdf"]
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [{"file_types": ["exe"]}, {"file_types": []}, {"sources": []}, {"sources": [""]}],
+)
+async def test_query_rejects_invalid_filters(filters: dict[str, Any]) -> None:
+    async with client_for(make_app(FakeChatProvider())) as client:
+        response = await client.post("/query", json={"query": "q", "filters": filters})
+
+    assert response.status_code == 422
+
+
+class RecordingMemoryStore:
+    """An in-process `MemoryStore` that returns every older turn of the thread."""
+
+    def __init__(self) -> None:
+        self.turns: dict[tuple[str, int], tuple[str, str]] = {}
+
+    async def save_turn(
+        self, thread_id: str, turn_index: int, vector: Sequence[float], *, query: str, answer: str
+    ) -> None:
+        self.turns[(thread_id, turn_index)] = (query, answer)
+
+    async def search_turns(
+        self,
+        thread_id: str,
+        vector: Sequence[float],
+        *,
+        limit: int,
+        before_turn: int,
+        score_threshold: float | None = None,
+    ) -> list[RememberedTurn]:
+        return [
+            RememberedTurn(turn_index=index, query=query, answer=answer, score=1.0)
+            for (thread, index), (query, answer) in self.turns.items()
+            if thread == thread_id and index < before_turn
+        ][:limit]
+
+    async def delete_thread(self, thread_id: str) -> None:
+        self.turns = {key: turn for key, turn in self.turns.items() if key[0] != thread_id}
+
+
+class ConstantEmbeddingProvider:
+    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[1.0] for _ in texts]
+
+    async def embed_query(self, text: str) -> list[float]:
+        return [1.0]
+
+    def count_tokens(self, text: str) -> int:
+        return len(text.split())
+
+
+async def test_memory_recalls_turns_outside_the_history_window_and_is_deleted_with_the_thread(
+) -> None:
+    store = RecordingMemoryStore()
+    memory = ConversationMemory(ConstantEmbeddingProvider(), store, top_k=1)
+    chat = ScriptedChatProvider(answer=["First [1].", "Second [1].", "Third [1]."])
+    application = make_app(chat, checkpointer=memory_saver(), agent_history_turns=1)
+    application.dependency_overrides[get_conversation_memory] = lambda: memory
+
+    async with client_for(application) as client:
+        for question in ("One?", "Two?"):
+            await client.post("/query", json={"query": question, "thread_id": "t1"})
+        third = await client.post("/query", json={"query": "Three?", "thread_id": "t1"})
+        stored_before_delete = dict(store.turns)
+        deleted = await client.delete("/threads/t1")
+
+    metadata = third.json()["metadata"]
+    assert metadata["recalled_turns"] == 1
+    assert metadata["nodes"] == ["recall", *DEFAULT_NODES]
+    assert chat.calls_for("answer")[2][1:5] == [
+        {"role": "user", "content": "One?"},
+        {"role": "assistant", "content": "First [1]."},
+        {"role": "user", "content": "Two?"},
+        {"role": "assistant", "content": "Second [1]."},
+    ]
+    assert sorted(stored_before_delete) == [("t1", 0), ("t1", 1), ("t1", 2)]
+    assert deleted.status_code == 204
+    assert store.turns == {}
+
+
+async def test_memory_is_not_used_without_a_checkpointer() -> None:
+    store = RecordingMemoryStore()
+    memory = ConversationMemory(ConstantEmbeddingProvider(), store)
+    application = make_app(ScriptedChatProvider())
+    application.dependency_overrides[get_conversation_memory] = lambda: memory
+
+    async with client_for(application) as client:
+        response = await client.post("/query", json={"query": "One?"})
+
+    assert response.json()["metadata"]["nodes"] == DEFAULT_NODES
+    assert store.turns == {}
+
+
+async def test_memory_dependency_is_none_by_default() -> None:
+    disabled = get_conversation_memory(Settings(_env_file=None, memory_enabled=False))
+
+    assert await anext(disabled) is None

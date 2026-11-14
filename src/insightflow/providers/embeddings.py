@@ -38,13 +38,21 @@ class EmbeddingProvider(Protocol):
 
 
 class LiteLLMEmbeddingProvider:
-    """Generate embeddings with a LiteLLM-supported hosted provider."""
+    """Generate embeddings with a LiteLLM-supported hosted provider.
+
+    Asymmetric retrieval models (for example NVIDIA NIM and Cohere) embed questions and
+    passages differently and need an `input_type` for each. Set `query_input_type` and
+    `document_input_type` for such a model; without them no `input_type` is sent.
+    """
 
     def __init__(
         self,
         model: str,
         api_key: str | None = None,
         api_base: str | None = None,
+        *,
+        query_input_type: str | None = None,
+        document_input_type: str | None = None,
     ) -> None:
         normalized_model = model.strip()
         if not normalized_model:
@@ -52,6 +60,8 @@ class LiteLLMEmbeddingProvider:
         self._model = normalized_model
         self._api_key = api_key
         self._api_base = api_base
+        self._query_input_type = (query_input_type or "").strip() or None
+        self._document_input_type = (document_input_type or "").strip() or None
 
     def _request_options(self) -> dict[str, str]:
         """Return only explicitly configured connection options for LiteLLM."""
@@ -64,11 +74,22 @@ class LiteLLMEmbeddingProvider:
 
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed document inputs while preserving their input order."""
+        return await self._embed(texts, self._document_input_type)
+
+    async def embed_query(self, text: str) -> list[float]:
+        """Embed one query, with the query input type when one is configured."""
+        vectors = await self._embed([text], self._query_input_type)
+        return vectors[0]
+
+    async def _embed(self, texts: Sequence[str], input_type: str | None) -> list[list[float]]:
+        options = self._request_options()
+        if input_type is not None:
+            options["input_type"] = input_type
         try:
             response = await aembedding(
                 model=self._model,
                 input=list(texts),
-                **self._request_options(),
+                **options,
             )
         except Timeout as exc:
             raise ProviderTimeoutError from exc
@@ -97,11 +118,6 @@ class LiteLLMEmbeddingProvider:
         if len(vectors) != len(texts):
             raise ProviderError("The embedding provider returned an unexpected vector count")
         return vectors
-
-    async def embed_query(self, text: str) -> list[float]:
-        """Embed one query through a query-specific domain method."""
-        vectors = await self.embed_documents([text])
-        return vectors[0]
 
     def count_tokens(self, text: str) -> int:
         """Count tokens using the tokenizer associated with the configured model."""

@@ -18,10 +18,16 @@ class AgentState(TypedDict, total=False):
     `history` persists across the turns of a checkpointed thread; nodes append to it. Every other
     field belongs to one turn and is reset by `new_turn_input`, because a checkpointer keeps the
     values of the previous turn.
+
+    `search_scope` holds the request's document filters (`file_types`, `sources`); `recalled`
+    holds older turns that conversation memory found for this question.
     """
 
     history: Annotated[list[ConversationTurn], operator.add]
     query: str
+    thread_id: str | None
+    search_scope: dict[str, list[str]]
+    recalled: list[ConversationTurn]
     observations: list[Observation]
     pending_action: AgentAction | None
     answer: str
@@ -31,10 +37,18 @@ class AgentState(TypedDict, total=False):
     node_trace: list[str]
 
 
-def new_turn_input(query: str) -> AgentState:
+def new_turn_input(
+    query: str,
+    *,
+    thread_id: str | None = None,
+    search_scope: dict[str, list[str]] | None = None,
+) -> AgentState:
     """Return the graph input for a new turn, with every per-turn field reset."""
     return {
         "query": query,
+        "thread_id": thread_id,
+        "search_scope": dict(search_scope or {}),
+        "recalled": [],
         "observations": [],
         "pending_action": None,
         "answer": "",
@@ -51,23 +65,24 @@ def attempt_observations(state: AgentState) -> list[Observation]:
     return [item for item in state.get("observations", []) if item.attempt == attempt]
 
 
+def prompt_turns(state: AgentState, max_turns: int) -> list[ConversationTurn]:
+    """The turns shown in prompts: recalled older turns, then the last `max_turns` turns."""
+    recent = state.get("history", [])[-max_turns:] if max_turns > 0 else []
+    return [*state.get("recalled", []), *recent]
+
+
 def history_messages(state: AgentState, max_turns: int) -> list[ChatMessage]:
-    """Render the last `max_turns` turns of the conversation as chat messages."""
-    if max_turns <= 0:
-        return []
+    """Render the recalled and the last `max_turns` turns as chat messages."""
     messages: list[ChatMessage] = []
-    for turn in state.get("history", [])[-max_turns:]:
+    for turn in prompt_turns(state, max_turns):
         messages.append({"role": "user", "content": turn.query})
         messages.append({"role": "assistant", "content": turn.answer})
     return messages
 
 
 def render_history(state: AgentState, max_turns: int) -> str:
-    """Render recent turns as plain text for prompts that plan or judge."""
-    if max_turns <= 0:
-        return ""
-    lines = [
+    """Render the same turns as plain text for prompts that plan or judge."""
+    return "\n\n".join(
         f"User: {turn.query}\nAssistant: {turn.answer}"
-        for turn in state.get("history", [])[-max_turns:]
-    ]
-    return "\n\n".join(lines)
+        for turn in prompt_turns(state, max_turns)
+    )

@@ -15,7 +15,9 @@ def make_act_node(search: DocumentSearch, tools: ToolSet) -> AgentNode:
         if action is None or action.is_answer:
             raise ValueError("act needs a pending tool action")
         if action.action == SEARCH_TOOL:
-            result, passages = await search.search(action.arguments)
+            result, passages = await search.search(
+                action.arguments, scope=state.get("search_scope")
+            )
         else:
             result, passages = await tools.call_tool(action.action, action.arguments), []
         observation = Observation(

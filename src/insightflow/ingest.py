@@ -13,6 +13,7 @@ from insightflow.providers.embeddings import LiteLLMEmbeddingProvider
 from insightflow.rag.config import ChunkingConfig, EmbeddingConfig, IngestionConfig
 from insightflow.rag.ingestion import IngestionPipeline, create_chunker, create_default_parsers
 from insightflow.rag.models import IngestionResult
+from insightflow.rag.sparse import Bm25SparseEncoder
 from insightflow.storage.qdrant import QdrantStore
 
 
@@ -51,6 +52,7 @@ def embedding_config_from_settings(settings: Settings) -> EmbeddingConfig:
         dimensions=dimensions,
         max_input_tokens=max_input_tokens,
         distance=settings.qdrant_distance,
+        document_input_type=settings.embedding_document_input_type.strip() or None,
     )
 
 
@@ -68,6 +70,8 @@ async def run(corpus_dir: Path, settings: Settings, *, force: bool) -> list[Inge
         model=settings.litellm_embedding_model,
         api_key=settings.litellm_api_key,
         api_base=settings.litellm_api_base,
+        query_input_type=settings.embedding_query_input_type,
+        document_input_type=settings.embedding_document_input_type,
     )
     store = QdrantStore(settings)
     try:
@@ -86,6 +90,9 @@ async def run(corpus_dir: Path, settings: Settings, *, force: bool) -> list[Inge
                 embedding_batch_size=settings.rag_embedding_batch_size,
                 upload_batch_size=settings.rag_upload_batch_size,
                 force=force,
+            ),
+            sparse_encoder=(
+                Bm25SparseEncoder() if settings.rag_retrieval_mode == "hybrid" else None
             ),
         )
         return await pipeline.ingest_corpus(corpus_dir)

@@ -26,10 +26,14 @@ class Settings(BaseSettings):
     embedding_provider: str = ""
     embedding_dimensions: int | None = Field(default=None, ge=1)
     embedding_max_input_tokens: int | None = Field(default=None, ge=1)
+    # `input_type` values for asymmetric embedding models (NVIDIA NIM: query and passage).
+    embedding_query_input_type: str = ""
+    embedding_document_input_type: str = ""
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
     qdrant_collection: str = "insightflow_documents"
     qdrant_vector_name: str = "dense"
+    qdrant_sparse_vector_name: str = "sparse"
     qdrant_distance: Literal["cosine", "dot", "euclid", "manhattan"] = "cosine"
     rag_corpus_dir: Path | None = None
     rag_chunking_strategy: Literal[
@@ -49,6 +53,24 @@ class Settings(BaseSettings):
     rag_candidate_top_k: int = Field(default=12, ge=1, le=100)
     rag_generation_max_chunks: int = Field(default=6, ge=1)
     rag_context_token_budget: int = Field(default=6000, ge=1)
+    # Stage 6 retrieval options. Each one is off by default (see "Retrieval quality" in README.md).
+    rag_retrieval_mode: Literal["dense", "hybrid"] = "dense"
+    rag_score_threshold: float | None = None
+    rag_query_expansion: Literal["off", "multi_query", "decompose"] = "off"
+    rag_query_expansion_max_queries: int = Field(default=3, ge=2, le=6)
+    litellm_rerank_model: str = ""
+    litellm_rerank_api_key: str | None = None
+    litellm_rerank_api_base: str | None = None
+    rag_rerank_top_n: int = Field(default=6, ge=1, le=100)
+    rag_corrective_retrieval_enabled: bool = False
+    rag_neighbors_per_hit: int = Field(default=0, ge=0, le=2)
+    rag_context_compression_enabled: bool = False
+    rag_search_filters_enabled: bool = False
+    agent_multi_hop_enabled: bool = False
+    memory_enabled: bool = False
+    memory_collection: str = "insightflow_memory"
+    memory_top_k: int = Field(default=3, ge=1, le=20)
+    memory_score_threshold: float | None = None
     agent_verifier_llm_enabled: bool = True
     agent_max_attempts: int = Field(default=2, ge=1, le=4)
     agent_history_turns: int = Field(default=6, ge=0, le=50)

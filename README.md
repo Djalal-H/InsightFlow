@@ -74,8 +74,9 @@ QDRANT_TEST_URL=http://localhost:6333 pytest -m qdrant
 
 - `api`: HTTP routes and transport schemas
 - `agents`: LangGraph state, nodes, and graph construction
-- `providers`: provider-independent chat and embedding contracts with LiteLLM adapters
+- `providers`: provider-independent chat, embedding, and rerank contracts with LiteLLM adapters
 - `rag`: ingestion and retrieval domain boundaries
+- `evaluation`: labeled retrieval evaluation
 - `storage`: Qdrant access
 - `tools`: tool contracts, the MCP client adapter, and InsightFlow's own MCP servers
 - `core`: configuration, logging, and shared errors
@@ -117,6 +118,14 @@ Ingestion requires `EMBEDDING_PROVIDER`, `LITELLM_EMBEDDING_MODEL`, `EMBEDDING_D
 `EMBEDDING_MAX_INPUT_TOKENS`. The collection is created with the named vector
 `QDRANT_VECTOR_NAME`; an existing collection whose vector size or distance differs is refused,
 not migrated.
+
+Some embedding models are asymmetric: they embed a question and a passage differently and need
+an `input_type` for each. For such a model, set `EMBEDDING_QUERY_INPUT_TYPE` and
+`EMBEDDING_DOCUMENT_INPUT_TYPE` (NVIDIA NIM retrieval models: `query` and `passage`; Cohere:
+`search_query` and `search_document`). Without them the dense ranking is almost random: on the
+evaluation set, the hit rate was 0.500 without the types and 0.979 with them. Leave both empty
+for symmetric models such as OpenAI's. A change of the document type embeds every document again
+at the next ingestion.
 
 ```bash
 docker compose up -d qdrant
@@ -234,6 +243,15 @@ only while the process runs; `none` makes every request stateless (`thread_id` i
 - Concurrent requests on the same thread are not serialized. Send one request per thread at a
   time.
 
+Prompts show only the last `AGENT_HISTORY_TURNS` turns. With `MEMORY_ENABLED=true`, each completed
+turn of a thread is also embedded and stored in the Qdrant collection `MEMORY_COLLECTION`. For a
+new question, a `recall` node runs first: it finds the `MEMORY_TOP_K` older turns (outside that
+window) that are most similar to the question, and the prompts show them before the recent turns.
+`metadata.recalled_turns` reports how many were added, and `metadata.nodes` starts with `recall`.
+`DELETE /threads/{thread_id}` also deletes the remembered turns. Memory is an aid: when its
+embedding or storage call fails, a warning is logged and the request continues without it.
+Turns that were completed before memory was turned on are not stored.
+
 ### Streaming
 
 `POST /query/stream` accepts the same body and runs the same workflow, but returns Server-Sent
@@ -241,7 +259,7 @@ Events:
 
 | Event | Data |
 | --- | --- |
-| `node` | `{"node": "agent", "action": "search_documents"}` after each step; `act` adds `tool` and `status`, `verify` adds `status`, `retry` adds `attempt` |
+| `node` | `{"node": "agent", "action": "search_documents"}` after each step; `act` adds `tool` and `status`, `verify` adds `status`, `retry` adds `attempt`, `recall` adds `recalled_turns` |
 | `token` | `{"attempt": 1, "text": "…"}`: a piece of the answer |
 | `attempt` | `{"attempt": 2}`: a retry started; discard the tokens of earlier attempts |
 | `final` | the complete `QueryResponse` |
@@ -254,6 +272,99 @@ curl -N localhost:8000/query/stream -H 'content-type: application/json' \
 
 Request validation and configuration errors that occur before the stream starts return normal
 HTTP errors. After the stream starts, the status is 200 and a failure is sent as one `error` event.
+
+## Retrieval quality (Stage 6)
+
+Plain dense retrieval is the default. Each technique below is an option that is off until you
+turn it on, so that you can compare it on the labeled evaluation set before you use it.
+
+| Technique | Setting | What it does | Extra cost per search |
+| --- | --- | --- | --- |
+| Hybrid dense/sparse | `RAG_RETRIEVAL_MODE=hybrid` | Fuses the dense ranking with a lexical BM25 ranking (reciprocal rank fusion in Qdrant). Finds exact terms such as course codes and names. | None |
+| Query rewriting | `RAG_QUERY_EXPANSION=multi_query` | A chat model writes other wordings; all are searched concurrently and fused. | 1 chat call, more embeddings |
+| Multi-hop (independent facts) | `RAG_QUERY_EXPANSION=decompose` | A chat model writes one query per fact that the question needs. | 1 chat call, more embeddings |
+| Multi-hop (dependent facts) | `AGENT_MULTI_HOP_ENABLED=true` | Adds a planning hint to the agent: one fact per search step, the next query uses what was found. | None |
+| Reranking | `LITELLM_RERANK_MODEL=<model>` | A hosted reranker orders the candidates; the best `RAG_RERANK_TOP_N` stay. | 1 rerank call |
+| Corrective retrieval | `RAG_CORRECTIVE_RETRIEVAL_ENABLED=true` | A chat model drops irrelevant passages. When none helps, it writes a new query, which is searched once. No relevant passage gives an empty result, so the agent searches differently or uses another tool. | 1–2 chat calls |
+| Parent context | `RAG_NEIGHBORS_PER_HIT=1` | Adds the neighboring chunks of each hit to its passage (through the stored `previous_chunk_id`/`next_chunk_id` links). The citation stays the hit. | 1 Qdrant read |
+| Context compression | `RAG_CONTEXT_COMPRESSION_ENABLED=true` | A chat model selects the sentences that help; the passage keeps only those, word for word, with `[...]` for omissions. | 1 chat call |
+| Metadata filters | request `filters`; `RAG_SEARCH_FILTERS_ENABLED=true` | Limits search by file type and source path (see below). | None |
+| Conversation memory | `MEMORY_ENABLED=true` | Recalls older turns of the thread by similarity (see [Conversation threads](#conversation-threads)). | 2 embedding calls per turn |
+
+The steps run in this order: search (dense or hybrid) → query expansion and fusion → reranking →
+corrective grading → neighbor expansion → compression → context budget. `rag/composition.py`
+builds this chain from `RetrievalConfig`; the agent sees only the `Retriever` protocol.
+
+Notes:
+
+- **No local models.** The sparse vectors are computed in Python (`rag/sparse.py`: hashed terms
+  with BM25 weights; Qdrant applies IDF). Reranking and the chat steps use hosted APIs.
+- **Hybrid needs a hybrid index.** Set `RAG_RETRIEVAL_MODE=hybrid`, use a new
+  `QDRANT_COLLECTION`, and run the ingestion again. A dense-only collection is refused. In hybrid
+  mode, `score` in the response is a fusion score, not a similarity. After reranking it is the
+  reranker's relevance score.
+- **Safe fallbacks.** When a chat step returns unreadable JSON, the step changes nothing: the
+  original query is searched, the passages stay, and nothing is compressed. Provider failures
+  still return the sanitized `provider_*` errors.
+- **Cost.** With every chat step on, one `search_documents` call makes up to five more chat calls,
+  and the agent can search `AGENT_MAX_STEPS` times per attempt.
+
+### Metadata filters
+
+A request can limit every document search of the turn:
+
+```bash
+curl -s localhost:8000/query -H 'content-type: application/json' -d '{
+  "query": "What are the quiet hours?",
+  "filters": {"file_types": ["pdf"], "sources": ["PDF/student_handbook.pdf"]}
+}'
+```
+
+`file_types` accepts `pdf`, `docx`, `md`, and `txt`; `sources` takes corpus-relative paths as
+`source_identifier` reports them. Web search ignores the filters. With
+`RAG_SEARCH_FILTERS_ENABLED=true`, the agent also gets `file_types` and `sources` as optional
+arguments of `search_documents`. Its filters can only narrow the request's filters.
+
+### Evaluation
+
+`evaluation/retrieval_cases.jsonl` holds 48 labeled questions about the sample corpus. Each case
+names the source document and a text that a relevant passage contains, so the labels stay valid
+when chunking changes. The tags are `fact`, `keyword`, `paraphrase`, `table`, `split` (the answer
+is in a chunk without the words of the question), `prose`, and `multi_hop` (two labeled passages).
+
+```bash
+# Index the corpus with sparse vectors, in a collection of its own (billable embeddings).
+RAG_RETRIEVAL_MODE=hybrid QDRANT_COLLECTION=insightflow_eval \
+  PYTHONPATH=src python -m insightflow.ingest corpus/
+
+# Compare the techniques on that index (billable: embeddings, chat, and rerank calls).
+QDRANT_COLLECTION=insightflow_eval PYTHONPATH=src python -m insightflow.evaluate
+QDRANT_COLLECTION=insightflow_eval PYTHONPATH=src python -m insightflow.evaluate \
+  --variants dense,hybrid,hybrid+rerank+neighbors --tag multi_hop --output scores.json
+```
+
+The command scores the passages that enter the model's context (after the chunk and token
+budget): `hit` (a labeled passage is present), `recall` (the share of labeled passages present),
+`mrr`, the number of passages, the context tokens, and the retrieval time. A variant is plain
+dense retrieval plus the named options (`hybrid`, `multi_query`, `decompose`, `rerank`,
+`corrective`, `neighbors`, `compress`); `configured` is the `.env` setup. The command reads the
+collection and writes nothing to it. It does not measure answer quality.
+
+Measured on 2026-11-13 with `nvidia_nim/nvidia/nemotron-3-embed-1b` (details in
+`docs/progress/PROGRESS.md`):
+
+| Variant | hit | recall | mrr | context tokens |
+| --- | --- | --- | --- | --- |
+| dense, no embedding input types | 0.500 | 0.469 | 0.398 | 1818 |
+| dense | 0.979 | 0.979 | 0.915 | 1147 |
+| hybrid | 0.979 | 0.958 | 0.924 | 1725 |
+| dense+neighbors | 0.979 | 0.979 | 0.915 | 1624 |
+| hybrid+neighbors | 0.979 | 0.958 | 0.913 | 3083 |
+
+The first row shows why the embedding input types are important (see
+[Corpus ingestion](#corpus-ingestion)). With them, dense retrieval finds 47 of the 48 cases, so
+this set can no longer separate the other options, and dense stays the default. The options
+that use chat or rerank calls are not measured yet.
 
 ## MCP tools (Stage 5)
 

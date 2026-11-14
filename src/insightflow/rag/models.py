@@ -163,6 +163,22 @@ class IngestionResult(DomainModel):
         return self
 
 
+class SparseVector(DomainModel):
+    """Term weights for lexical search: one value per hashed term index."""
+
+    indices: list[int] = Field(default_factory=list)
+    values: list[float] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_pairs(self) -> Self:
+        """Require one value per index and no repeated index."""
+        if len(self.indices) != len(self.values):
+            raise ValueError("indices and values must have equal lengths")
+        if len(set(self.indices)) != len(self.indices):
+            raise ValueError("indices must be unique")
+        return self
+
+
 class RetrievalQuery(DomainModel):
     """Validated retrieval request independent of the vector-store client."""
 
@@ -170,6 +186,7 @@ class RetrievalQuery(DomainModel):
     top_k: int = Field(default=12, ge=1, le=100)
     document_ids: list[str] | None = None
     source_types: list[str] | None = None
+    source_identifiers: list[str] | None = None
     languages: list[str] | None = None
     date_from: datetime | None = None
     date_to: datetime | None = None

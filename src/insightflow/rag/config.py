@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ChunkingStrategy = Literal["fixed_window", "structure_recursive", "semantic_max_min"]
 DistanceMetric = Literal["cosine", "dot", "euclid", "manhattan"]
+RetrievalMode = Literal["dense", "hybrid"]
+QueryExpansionMode = Literal["off", "multi_query", "decompose"]
 
 
 class RAGConfigModel(BaseModel):
@@ -48,15 +50,24 @@ class IngestionConfig(RAGConfigModel):
 
 
 class RetrievalConfig(RAGConfigModel):
-    """Dense retrieval and deterministic context-selection controls."""
+    """Retrieval, refinement, and context-selection controls.
 
+    The defaults give plain dense retrieval. Each Stage 6 technique is an explicit option, so
+    that it can be compared on the evaluation set before it becomes a default.
+    """
+
+    mode: RetrievalMode = "dense"
     candidate_top_k: int = Field(default=12, ge=1, le=100)
     generation_max_chunks: int = Field(default=6, ge=1)
     context_token_budget: int = Field(default=6000, ge=1)
     score_threshold: float | None = None
-    expand_neighbors: bool = False
-    max_neighbors_per_hit: int = Field(default=1, ge=0, le=2)
-    per_document_cap: int | None = Field(default=None, ge=1)
+    query_expansion: QueryExpansionMode = "off"
+    query_expansion_max_queries: int = Field(default=3, ge=2, le=6)
+    rerank: bool = False
+    rerank_top_n: int = Field(default=6, ge=1, le=100)
+    corrective: bool = False
+    neighbors_per_hit: int = Field(default=0, ge=0, le=2)
+    compress_context: bool = False
 
 
 class EmbeddingConfig(RAGConfigModel):
@@ -68,11 +79,19 @@ class EmbeddingConfig(RAGConfigModel):
     max_input_tokens: int = Field(ge=1)
     distance: DistanceMetric = "cosine"
     normalization: str = "provider_default"
+    document_input_type: str | None = None
 
     @property
     def fingerprint(self) -> str:
-        """Return a stable description of vector compatibility."""
-        return (
+        """Return a stable description of vector compatibility.
+
+        The document input type is part of it only when set, so indexes made without one keep
+        their fingerprint.
+        """
+        base = (
             f"{self.provider}:{self.model}:{self.dimensions}:"
             f"{self.distance}:{self.normalization}"
         )
+        if self.document_input_type:
+            return f"{base}:input_type={self.document_input_type}"
+        return base

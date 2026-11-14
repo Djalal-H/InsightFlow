@@ -32,6 +32,12 @@ AGENT_SYSTEM_PROMPT = (
     "help. Do not write the answer itself."
 )
 
+MULTI_HOP_HINT = (
+    "Plan: if the question needs several facts, search for one fact in each step. Use the "
+    "facts that you found to write the next query. Answer only when you have every fact, or "
+    "when no step is left."
+)
+
 ANSWER = AgentAction(action=ANSWER_ACTION)
 
 
@@ -41,8 +47,14 @@ def make_agent_node(
     *,
     max_steps: int,
     history_turns: int,
+    search_spec: ToolSpec = SEARCH_SPEC,
+    multi_hop: bool = False,
 ) -> AgentNode:
-    """Bind the agent model and the tool set; `max_steps` limits actions per attempt."""
+    """Bind the agent model and the tool set; `max_steps` limits actions per attempt.
+
+    `search_spec` is the document-search definition to offer (with or without filters), and
+    `multi_hop` adds a planning hint for questions that need several facts.
+    """
     if max_steps < 1:
         raise ValueError("max_steps must be at least 1")
 
@@ -52,8 +64,10 @@ def make_agent_node(
         if used >= max_steps:
             return {"pending_action": ANSWER}
 
-        catalog = await catalog_specs(tools)
-        prompt = agent_prompt(state, catalog, max_steps - used, history_turns)
+        catalog = await catalog_specs(tools, search_spec)
+        prompt = agent_prompt(
+            state, catalog, max_steps - used, history_turns, multi_hop=multi_hop
+        )
         messages = [
             {"role": "system", "content": AGENT_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
@@ -75,19 +89,30 @@ def make_agent_node(
     return agent_node
 
 
-async def catalog_specs(tools: ToolSet) -> list[ToolSpec]:
+async def catalog_specs(tools: ToolSet, search_spec: ToolSpec = SEARCH_SPEC) -> list[ToolSpec]:
     """The local search tool first, then the MCP tools; the reserved name is not overridden."""
-    return [SEARCH_SPEC, *(spec for spec in await tools.list_tools() if spec.name != SEARCH_TOOL)]
+    return [search_spec, *(spec for spec in await tools.list_tools() if spec.name != SEARCH_TOOL)]
 
 
 def agent_prompt(
-    state: AgentState, catalog: list[ToolSpec], steps_left: int, history_turns: int
+    state: AgentState,
+    catalog: list[ToolSpec],
+    steps_left: int,
+    history_turns: int,
+    *,
+    multi_hop: bool = False,
 ) -> str:
     parts: list[str] = []
     history = render_history(state, history_turns)
     if history:
         parts.append(f"Conversation so far:\n{history}")
     parts.append(f"Tools:\n{render_tool_catalog(catalog)}")
+    scope = state.get("search_scope") or {}
+    if scope:
+        limits = "; ".join(f"{name}: {', '.join(values)}" for name, values in scope.items())
+        parts.append(f"The user limited document search to {limits}.")
+    if multi_hop:
+        parts.append(MULTI_HOP_HINT)
     parts.append(f"Question: {state['query']}")
     feedback = state.get("feedback", [])
     if feedback:

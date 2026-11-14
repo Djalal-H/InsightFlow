@@ -8,6 +8,8 @@ The workflow is a ReAct loop with a verified answer::
                          │          └─ retry → agent   (failed, attempts left)
                          └─ finalize → END             (no observations: direct reply)
 
+With conversation memory, a `recall` node runs first (START → recall → agent).
+
 Both loops are bounded. `agent` ⇄ `act` stops after `max_steps` actions per attempt (the agent
 node enforces it, see `agents/nodes/agent.py`), and `retry` runs at most `max_attempts - 1` times.
 """
@@ -38,6 +40,7 @@ class WorkflowNodes:
     verify: AgentNode
     retry: AgentNode
     finalize: AgentNode
+    recall: AgentNode | None = None
 
 
 def after_agent(state: AgentState) -> Literal["act", "answer"]:
@@ -69,7 +72,8 @@ def make_after_verify(max_attempts: int) -> Callable[[AgentState], Literal["retr
 def recursion_limit(max_steps: int, max_attempts: int) -> int:
     """The LangGraph step limit that the bounded loops can never reach, plus a margin."""
     per_attempt = 2 * max_steps + 3  # agent/act pairs, the final agent, answer, and verify
-    return max_attempts * (per_attempt + 1) + 2  # one retry per attempt, finalize, margin
+    # One retry per attempt, then recall, finalize, and a margin.
+    return max_attempts * (per_attempt + 1) + 3
 
 
 def traced(name: str, node: AgentNode) -> AgentNode:
@@ -93,7 +97,12 @@ def build_graph(
     graph = StateGraph(AgentState)
     for name in NODE_NAMES:
         graph.add_node(name, traced(name, getattr(nodes, name)))  # type: ignore[call-overload]
-    graph.add_edge(START, "agent")
+    if nodes.recall is not None:
+        graph.add_node("recall", traced("recall", nodes.recall))  # type: ignore[call-overload]
+        graph.add_edge(START, "recall")
+        graph.add_edge("recall", "agent")
+    else:
+        graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", after_agent)
     graph.add_edge("act", "agent")
     graph.add_conditional_edges("answer", after_answer)
