@@ -1,5 +1,6 @@
 """Sanitized HTTP mappings for expected application failures."""
 
+import logging
 from typing import Final
 
 from fastapi import Request, status
@@ -14,6 +15,9 @@ from insightflow.core.exceptions import (
     StorageError,
     ThreadNotFoundError,
 )
+from insightflow.core.observability import record_error
+
+logger = logging.getLogger(__name__)
 
 CONFIGURATION_ERROR: Final = {
     "code": "provider_configuration_error",
@@ -60,12 +64,23 @@ def describe_error(exc: InsightFlowError) -> tuple[int, dict[str, str]]:
     raise TypeError(f"no public mapping for {type(exc).__name__}")
 
 
+def report_error(exc: InsightFlowError) -> tuple[int, dict[str, str]]:
+    """Map a failure like `describe_error`, and log and record its code (not its message)."""
+    status_code, detail = describe_error(exc)
+    record_error(detail["code"])
+    logger.warning(
+        "request failed",
+        extra={"fields": {"code": detail["code"], "error_type": type(exc).__name__}},
+    )
+    return status_code, detail
+
+
 async def provider_error_handler(request: Request, exc: Exception) -> JSONResponse:
     """Return a fixed public response without exposing provider exception details."""
     del request
     if not isinstance(exc, ProviderError):
         raise exc
-    status_code, detail = describe_error(exc)
+    status_code, detail = report_error(exc)
     return JSONResponse(status_code=status_code, content={"error": detail})
 
 
@@ -74,7 +89,7 @@ async def storage_error_handler(request: Request, exc: Exception) -> JSONRespons
     del request
     if not isinstance(exc, StorageError):
         raise exc
-    status_code, detail = describe_error(exc)
+    status_code, detail = report_error(exc)
     return JSONResponse(status_code=status_code, content={"error": detail})
 
 
@@ -83,5 +98,5 @@ async def application_error_handler(request: Request, exc: Exception) -> JSONRes
     del request
     if not isinstance(exc, InsightFlowError):
         raise exc
-    status_code, detail = describe_error(exc)
+    status_code, detail = report_error(exc)
     return JSONResponse(status_code=status_code, content={"error": detail})

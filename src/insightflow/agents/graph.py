@@ -23,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from insightflow.agents.state import AgentState
+from insightflow.core.observability import node_run
 
 AgentNode = Callable[[AgentState], Awaitable[AgentState]]
 AgentGraph = CompiledStateGraph[AgentState, None, AgentState, AgentState]
@@ -77,10 +78,14 @@ def recursion_limit(max_steps: int, max_attempts: int) -> int:
 
 
 def traced(name: str, node: AgentNode) -> AgentNode:
-    """Wrap a node so that its name is appended to the turn's `node_trace`."""
+    """Wrap a node: append its name to the turn's `node_trace` and record the run.
+
+    Provider, store, and tool calls made inside the node are attributed to it.
+    """
 
     async def traced_node(state: AgentState) -> AgentState:
-        update = await node(state)
+        async with node_run(name, state.get("attempt", 1)):
+            update = await node(state)
         update["node_trace"] = [*state.get("node_trace", []), name]
         return update
 

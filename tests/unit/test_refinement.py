@@ -8,6 +8,13 @@ from typing import Any
 
 import pytest
 
+from insightflow.core.exceptions import (
+    ProviderConfigurationError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+)
+from insightflow.core.observability import RunRecorder, recording
 from insightflow.providers.rerank import RerankResult
 from insightflow.rag.models import Chunk, RetrievalQuery, RetrievedChunk
 from insightflow.rag.refinement import (
@@ -237,3 +244,35 @@ async def test_compressor_makes_no_call_without_long_passages() -> None:
         candidates
     )
     assert chat.calls == []
+
+
+class FailingRerankProvider:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def rerank(
+        self, query: str, documents: Sequence[str], *, top_n: int
+    ) -> list[RerankResult]:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "error", [ProviderError("content screening"), ProviderRateLimitError(), ProviderTimeoutError()]
+)
+async def test_a_failed_rerank_keeps_the_retrieval_order_and_records_the_error(
+    error: ProviderError,
+) -> None:
+    candidates = [make_candidate(f"c{n}", f"text {n}", rank=n) for n in range(1, 5)]
+    reranker = Reranker(FailingRerankProvider(error), top_n=2)
+
+    with recording(RunRecorder()) as recorder:
+        kept = await reranker.process(RetrievalQuery(text="q"), candidates)
+
+    assert [c.chunk.chunk_id for c in kept] == ["c1", "c2"]
+    assert sum(recorder.errors.values()) == 1
+
+
+async def test_a_rerank_configuration_error_is_raised() -> None:
+    reranker = Reranker(FailingRerankProvider(ProviderConfigurationError()), top_n=2)
+    with pytest.raises(ProviderConfigurationError):
+        await reranker.process(RetrievalQuery(text="q"), [make_candidate()])

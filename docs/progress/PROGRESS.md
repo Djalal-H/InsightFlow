@@ -2,8 +2,8 @@
 
 ## Current status
 
-- Current stage: Stage 6 complete on `feature/stage6-retrieval-quality` (closed by the author's decision). Every retrieval-quality candidate is an option that is off by default; the embedding `input_type` fix is measured; the chat-backed options, reranking, and memory are verified with mocks only.
-- Last updated: 2026-11-13
+- Current stage: Stage 7 complete on `feature/stage7-observability` (closed by the author's decision on 2026-11-15). Structured logs with request IDs, usage in the response, a Langfuse sink verified against Langfuse Cloud, two regression sets, a retrieval baseline check, and a budgeted answer evaluation are implemented; answer quality and the Stage 6 chat-backed options are measured on hosted models. Reranking is measured in part only (rate-limited Cohere trial key).
+- Last updated: 2026-11-15
 - Overall state: in progress
 
 ## Stage summary
@@ -16,7 +16,7 @@
 | Stage 4 | in progress | Router, verifier, bounded retries, execution metadata, SQLite checkpointer with threads, and SSE streaming verified with mocks; no hosted-model run yet |
 | Stage 5 | complete | MCP client adapter with per-call controls, calculator MCP server, ReAct agent loop with document search as a tool, Tavily web search with web sources, and a tool server cooldown, verified with mocks and in-process servers; the opt-in Tavily test and three hosted-model queries passed (2026-11-10) |
 | Stage 6 | complete | All candidates implemented and verified with mocks and on a real Qdrant server. Measured on 48 labeled questions with hosted embeddings: the `input_type` fix raised the dense hit rate from 0.500 to 0.979; hybrid and neighbor expansion gave no gain after it. Closed by the author's decision with the chat-backed options, reranking, and memory not measured on hosted models |
-| Stage 7 | not started | —                                                                                                          |
+| Stage 7 | complete | Request IDs, JSON logs, `metadata.usage`, and an opt-in Langfuse sink (real export to Langfuse Cloud verified); structured-output and workflow regression sets in the default suite; retrieval baseline check; budgeted answer evaluation run on hosted models (2026-11-15). Closed by the author's decision with reranking measured in part and the refusal failures open |
 | Stage 8 | not started | —                                                                                                          |
 
 ## Work log
@@ -509,3 +509,163 @@
   - The author's `.env` must set `EMBEDDING_QUERY_INPUT_TYPE=query` and `EMBEDDING_DOCUMENT_INPUT_TYPE=passage`, followed by a new ingestion.
   - No parent-child hierarchy in the index, no language or date filters, no total context budget across the searches of one turn.
   - `metadata.recalled_turns` and `QueryRequest.filters` are new API fields.
+
+### 2026-11-14 — Stage 7 observability, regression sets, and answer evaluation
+
+- Stage: Stage 7
+- Status: in progress (code complete; the hosted run is not done)
+- Scope: Made each request visible (request IDs, structured logs, usage counters, optional Langfuse traces), added deterministic regression sets to the default suite, a baseline check for retrieval scores, and a budgeted answer-quality evaluation. Technology choice by the author: standard-library logs plus Langfuse; no OpenTelemetry exporter of our own, no Prometheus/Grafana.
+- Changed:
+  - `src/insightflow/core/observability.py` — new: `RunRecorder` (provider, store, tool, and node records), context variables for the run and the node, `error_code`, `CallBudget`, `TraceSink`/`NullTraceSink`, `export_run`.
+  - `src/insightflow/core/logging.py` — `LOG_FORMAT=text|json`, run context and `fields` on every line, `Redactor` (configured secrets, bearer tokens, API-key shapes). `configure_logging` replaces only its own handler.
+  - `src/insightflow/api/middleware.py` — new: `X-Request-ID` (kept when safe, else new), one recorder per request, one access line.
+  - `src/insightflow/providers/instrumented.py` — new: chat, embedding, and rerank wrappers. `providers/llm.py`, `embeddings.py`, `rerank.py` report `response.usage`.
+  - `src/insightflow/agents/graph.py` (`traced` records node runs), `agents/nodes/act.py` (tool records), `storage/qdrant.py`, `storage/qdrant_memory.py` (store records).
+  - `src/insightflow/api/` — `metadata.usage` (`UsageReport`), `report_error` logs the code, `finish_run` logs `query completed` and exports the trace, `get_trace_sink`/`create_trace_sink`; `main.py` adds the middleware, the sink, and the log settings.
+  - `src/insightflow/observability/langfuse_sink.py` — new: Langfuse sink. `requirements.txt` — `langfuse==5.1.0` (released 2026-10-30; it brings `opentelemetry-sdk` 1.45.2 and the OTLP HTTP exporter). The 5.x SDK has no ingestion API and no start time on `start_observation`, so the sink creates spans with real start and end times on a private OpenTelemetry provider with Langfuse's span attributes; the global provider is not changed.
+  - `src/insightflow/core/config.py`, `.env.example` — `LOG_FORMAT`, `LANGFUSE_*`, `Settings.secret_values()`. `core/exceptions.py` — `BudgetExceededError`.
+  - `evaluation/structured_cases.jsonl` (34 cases), `evaluation/workflow_cases.jsonl` (14 cases), `evaluation/answer_cases.jsonl` (28 cases) — new.
+  - `src/insightflow/evaluation/answers.py`, `src/insightflow/evaluate_answers.py` — new: answer scoring, `RunBudget`, estimate, report. `evaluation/retrieval.py`, `evaluate.py` — `--baseline`/`--tolerance` (exit 3 on a regression) and model calls and tokens per variant.
+  - Tests: `tests/unit/test_observability.py`, `test_logging.py`, `test_langfuse_sink.py`, `test_structured_regression.py`, `test_answer_evaluation.py`, `tests/integration/test_observability_api.py`, `test_workflow_regression.py`; additions to `test_query_api.py`, `test_evaluate_cli.py`, `test_retrieval_evaluation.py`, `tests/fakes.py` (`evaluate` role; reply lists are copied). `pyproject.toml` — `langfuse` marker.
+  - `README.md`, `CLAUDE.md`, `docs/Implement Plan Draft.md` — documentation.
+- Validation:
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues found in 80 source files
+  - `pytest -q -p no:cacheprovider` — passed: 615 passed, 5 skipped; coverage 96%
+  - `docker compose up -d qdrant`, then `QDRANT_TEST_URL=http://localhost:6333 pytest -m qdrant -q -p no:cacheprovider --no-cov` — passed: 3 passed
+  - `git diff --check` — passed
+  - Manual: `LOG_FORMAT=json CHECKPOINT_BACKEND=memory TOOL_WEB_SEARCH_ENABLED=false uvicorn insightflow.main:app --app-dir src --port 8765`, then `GET /health/live` with `X-Request-ID: manual-check-1` and with `X-Request-ID: bad id`: the first ID was returned and logged, the second was replaced by a new one; the access lines were JSON with `request_id`. No `/query` was sent (it is billable).
+  - `PYTHONPATH=src python -m insightflow.evaluate_answers --dry-run` — 28 cases x 1 variant; estimated chat calls about 140, at most 420; no request.
+  - Answer facts: every accepted phrasing was checked against the text of its source file, extracted locally with `pypdf` and the DOCX XML (scratch script, not in the repository); the 3 refusal questions use words that no corpus file contains (`password`, `mayor`, `drone`).
+- Findings:
+  - `ScriptedChatProvider` used the caller's reply lists and removed items from them; it now copies them. The workflow regression set showed it.
+  - `parse_json_object` returns `None` when the first JSON object in the output does not match the schema, also when a later object does. A reasoning model that writes a JSON object inside `<think>` before its action is read as unparseable (`agent-think-tag-with-json-object` documents this). Not changed in this stage.
+  - When every observation is a tool error, the answer node gives the fixed no-context answer without a model call (cases `tool-timeout`, `unknown-tool`).
+  - The Langfuse SDK keeps one exporter per public key and process; the sink sends its spans to the provider that the SDK keeps, and the tests use a new key per sink.
+- Decisions:
+  - One instrumentation point (the recorder) feeds the logs, the response, and Langfuse; adapters report to it through a context variable, so no signature changed.
+  - Usage tokens are `null` when the provider does not report them; they are not estimated. Streamed answers have tokens only if the provider sends a usage chunk.
+  - Content (questions, prompts, answers) is never logged. It goes to Langfuse only with `LANGFUSE_CAPTURE_CONTENT=true`.
+  - Tool records come from the `act` node, so the local document search is recorded too.
+  - The answer evaluation runs without tools by default (web search is billable and not part of the corpus) and counts an unreadable judge verdict as unjudged.
+- Not verified:
+  - No hosted request was made in this entry: real token usage fields of the configured NVIDIA NIM models, the answer evaluation scores, and a real Langfuse export (`pytest -m langfuse` was skipped; no keys).
+- Remaining:
+  - Budgeted hosted run (7.7): the answer evaluation with the configured setup, and the Stage 6 chat-backed and rerank variants; needs the author's approval of the estimate.
+  - Record a retrieval baseline file after the hosted run.
+
+### 2026-11-15 — Stage 7 budgeted hosted run
+
+- Stage: Stage 7
+- Status: in progress
+- Scope: The hosted run of plan step 7.7, approved by the author after the estimate (about 330 chat calls). Local Qdrant, collection `insightflow_eval` (the Stage 6 index with embedding input types), chat model `nvidia_nim/nvidia/nemotron-3.5-bolt-e4b`, embedding model `nvidia_nim/nvidia/nemotron-3-embed-1b`, `.env` agent settings (LLM verifier on). No rerank model is configured, so reranking was not measured; Langfuse was off (no keys).
+- Run A — answer quality:
+  - `QDRANT_COLLECTION=insightflow_eval PYTHONPATH=src python -m insightflow.evaluate_answers --max-chat-calls 200 --output <scratch>/answers.json` — exit 0; 28/28 cases completed; 167 chat calls, 244,331 tokens (the provider reports token use, so `usage` is filled).
+
+    | variant | facts | judge facts | unsupported claims / case | refusal correct | citations valid | source coverage | verification passed | retries / case | mean ms |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | configured (dense) | 0.960 | 0.940 | 0.214 | 0.857 | 1.000 | 0.960 | 0.893 | 0.143 | 3987 |
+
+  - None of the 3 questions that the corpus cannot answer (`refuse-wifi-password`, `refuse-town-mayor`, `refuse-drone-policy`) was refused: the judge found an answer that was not a refusal, and these cases took two attempts and 8 to 13 chat calls each. The answer texts were not kept (content is not logged), so the cause is not known yet.
+  - `calendar-registrar-office` failed (no fact, no source, verification failed after two attempts). It is the case that dense retrieval missed in Stage 6.
+  - The judge counted one unsupported claim in each of 6 answers: 3 correct answers that passed verification (`calendar-fall-withdrawal`, `markdown-requests-install`, `hop-insurance-and-work`; the last one also lost one fact for the judge), `calendar-registrar-office`, and two of the unanswerable questions.
+- Run B — Stage 6 retrieval options on the 48 retrieval cases:
+  - `QDRANT_COLLECTION=insightflow_eval PYTHONPATH=src python -m insightflow.evaluate --variants dense,dense+multi_query,dense+decompose,dense+corrective,dense+compress --output <scratch>/retrieval.json` — exit 0; 192 chat calls, 405 embedding calls. `dense` was added as the reference (embedding calls only).
+
+    | Variant | hit | recall | mrr | passages | context tokens | ms | chat calls | tokens |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | dense | 0.979 | 0.979 | 0.915 | 6.0 | 1147 | 149 | 0 | 716 |
+    | dense+multi_query | 0.979 | 0.958 | 0.898 | 6.0 | 1170 | 574 | 48 | 7,117 |
+    | dense+decompose | 0.979 | 0.969 | 0.894 | 6.0 | 1133 | 509 | 48 | 7,139 |
+    | dense+corrective | 1.000 | 0.990 | 0.979 | 1.2 | 268 | 568 | 48 | 125,181 |
+    | dense+compress | 0.917 | 0.917 | 0.852 | 6.0 | 959 | 592 | 48 | 78,804 |
+
+  - Corrective retrieval found all 48 cases (it also finds `calendar-registrar-office`) with 1.2 passages and 77% fewer context tokens, at one grading call (about 2,600 tokens) per search. Compression lost labeled passages (keyword 0.818, prose 0.667). Multi-query and decompose gave no gain and lowered multi-hop recall.
+  - The scores are saved as `evaluation/baselines/retrieval_nemotron_embed_1b.json` for `evaluate --baseline`.
+- Decisions:
+  - No default changed. Corrective retrieval is the only option with a gain, on a set that dense retrieval almost solves; the author decides whether it becomes the default.
+- Not verified: reranking (no `LITELLM_RERANK_MODEL`), conversation memory, and a real Langfuse export.
+- Remaining:
+  - Find why the unanswerable questions are not refused (an answer run with `LANGFUSE_CAPTURE_CONTENT=true` or a local look at the three answers), then change the prompts if necessary.
+  - Decide about corrective retrieval as the default, and run the answer evaluation with it (`--variants dense+corrective`).
+  - `pytest -m langfuse` with real keys.
+
+### 2026-11-15 — Stage 7 Langfuse Cloud check
+
+- Stage: Stage 7
+- Status: in progress
+- Scope: The author added Langfuse Cloud keys to `.env` (with the names from the Langfuse project page). The application read the host only from `LANGFUSE_HOST`, so `LANGFUSE_BASE_URL` is now accepted as well.
+- Changed:
+  - `src/insightflow/core/config.py` — `langfuse_host` reads `LANGFUSE_HOST` or `LANGFUSE_BASE_URL`; `populate_by_name=True`, so `Settings(langfuse_host=...)` still works.
+  - `.env.example` — the second name. `tests/unit/test_logging.py` — one test for both names.
+- Validation:
+  - `ruff check src tests` — passed; `mypy src` — passed: no issues found in 80 source files
+  - `pytest -q -p no:cacheprovider --no-cov` — passed: 616 passed, 5 skipped
+  - `LANGFUSE_TEST_HOST=... LANGFUSE_TEST_PUBLIC_KEY=... LANGFUSE_TEST_SECRET_KEY=... pytest -m langfuse -q -p no:cacheprovider --no-cov -rs` (values from `.env`) — passed: 1 passed. The test passes also when the export fails (the exporter logs, it does not raise), so the trace was read back with the Langfuse API (`observations.get_many`, scratch script): one trace with the root span `query` (session `thread-1`, level ERROR), the node spans `agent`, `act`, `answer` under it, and the `chat.complete` generation (model `nim/chat`, usage input 100, output 20, total 120), `embedding.embed_query`, `qdrant.search` (retriever), and `search_documents` (tool) under their nodes; `chat.stream` has level ERROR. No hosted model call was made.
+- Findings:
+  - `LITELLM_RERANK_MODEL` in `.env` has no provider prefix (`nemotron-3.5-rerank-8b`); LiteLLM cannot resolve it (`get_llm_provider`: BadRequestError). With `nvidia_nim/nvidia/nemotron-3.5-rerank-8b` it resolves to `nvidia_nim`, which LiteLLM's rerank API supports. The author changes the line.
+- Remaining:
+  - Rerank measurement (approved by the author: `dense+rerank` and `dense+corrective+rerank` on the 48 retrieval cases) after the `.env` change.
+  - The refusal diagnosis run was not approved at this time.
+
+### 2026-11-15 — Stage 7 rerank measurement attempt and rerank error handling
+
+- Stage: Stage 7
+- Status: in progress
+- Scope: The approved rerank measurement (`dense+rerank`, `dense+corrective+rerank`) after the author set `LITELLM_RERANK_MODEL=nvidia_nim/nvidia/nemotron-3.5-rerank-8b`. The model gave no usable result; two defects in the handling of rerank failures were found and fixed.
+- Runs:
+  - `QDRANT_COLLECTION=insightflow_eval PYTHONPATH=src python -m insightflow.evaluate --variants dense+rerank,dense+corrective+rerank --output <scratch>/rerank.json` (first run) — exit 1 at the first rerank call: NVIDIA returned `422 Unprocessable Entity`, `{"error": {"message": "input rejected by content safety screening"}}`. LiteLLM's rerank path raises `BaseLLMException`, which `translate_provider_errors` did not map, so the error left the adapter unmapped (in the API it would be a 500, not the stable 502).
+  - Same command after the fixes below — exit 0, but all 96 rerank calls failed and were absorbed: `dense+rerank` gave the dense scores exactly (hit 0.979, recall 0.979, mrr 0.915), and `dense+corrective+rerank` the corrective order (hit 0.979, mrr 0.958, 1.3 passages). These rows do not measure reranking. 48 chat calls, 96 embedding calls, 96 rerank calls.
+  - One diagnostic call with two harmless sentences (scratch script) — the same 422 content-safety error. The refusal does not come from the corpus text; the model identifier or its endpoint is probably wrong for LiteLLM's NVIDIA NIM rerank route (`https://ai.api.nvidia.com/v1/retrieval/nvidia/nemotron-3.5-rerank-8b/reranking`).
+- Changed:
+  - `src/insightflow/providers/llm.py` — `translate_provider_errors` maps `BaseLLMException` by HTTP status (401/403/404 configuration, 429 rate limit, 408/504 timeout, else provider error).
+  - `src/insightflow/rag/refinement.py` — `Reranker` keeps the retrieval order (cut to `top_n`) when the rerank call fails with a provider error, and logs and records the code; a configuration error is still raised.
+  - `src/insightflow/evaluation/retrieval.py`, `src/insightflow/evaluate.py` — `VariantReport.errors`: absorbed failures by code, shown under the variant's row, so a run like the second one is visible as failed.
+  - Tests: `tests/unit/test_rerank_provider.py`, `test_refinement.py`, `test_retrieval_evaluation.py`; `test_answer_evaluation.py`, `test_langfuse_sink.py`, `test_logging.py` now pass `litellm_rerank_model`, `langfuse_enabled`, and `langfuse_secret_key` explicitly, because LiteLLM loads `.env` into the environment and the author's `.env` now sets them.
+- Validation:
+  - `ruff check src tests` — passed; `mypy src` — passed: no issues found in 80 source files
+  - `pytest -q -p no:cacheprovider` — passed: 625 passed, 5 skipped; coverage 96%
+  - `git diff --check` — passed
+- Findings:
+  - `Settings.litellm_api_key` (and `qdrant_api_key`, `litellm_rerank_api_key`) are `str`, not `SecretStr`, so a pydantic repr of `Settings` (for example in a pytest assertion message) shows the key in part. Not changed in this stage (Stage 8: secret management).
+- Remaining:
+  - The author checks the rerank model identifier on the NVIDIA API catalog; then the rerank measurement is repeated.
+
+### 2026-11-15 — Stage 7 rerank measurement with Cohere (partial)
+
+- Stage: Stage 7
+- Status: in progress
+- Scope: The author changed the reranker to Cohere (`LITELLM_RERANK_MODEL=cohere/rerank-english-v3.0`, own key in `LITELLM_RERANK_API_KEY`). No code change.
+- Runs:
+  - One test call with two sentences (scratch script) — passed: the relevant sentence first (score 0.999).
+  - `QDRANT_COLLECTION=insightflow_eval PYTHONPATH=src python -m insightflow.evaluate --variants dense+rerank,dense+corrective+rerank --output <scratch>/rerank_cohere.json` — exit 0; 96 rerank calls, 96 embedding calls, 48 chat calls.
+
+    | Variant | hit | recall | mrr | passages | context tokens | ms | absorbed failures |
+    | --- | --- | --- | --- | --- | --- | --- | --- |
+    | dense (reference, 2026-11-15) | 0.979 | 0.979 | 0.915 | 6.0 | 1147 | 149 | — |
+    | dense+rerank | 1.000 | 1.000 | 0.934 | 6.0 | 1124 | 422 | provider_rate_limited x9 |
+    | dense+corrective+rerank | 0.979 | 0.979 | 0.958 | 1.3 | 278 | 715 | provider_rate_limited x47 |
+
+- Findings:
+  - The Cohere key is rate limited (a trial key, as expected): 56 of 96 calls got 429. `dense+rerank` was reranked in 39 of 48 cases and already finds all 48 (it also finds `calendar-registrar-office`) with a higher mrr. `dense+corrective+rerank` was reranked in 1 case only, so its row is the corrective result, not a rerank result.
+  - The absorbed-failure line made the partial run visible; without it, the second row would look like a valid measurement.
+- Remaining:
+  - Repeat with a pause between cases (or a production key) for a complete measurement.
+
+### 2026-11-15 — Stage 7 closed
+
+- Stage: Stage 7
+- Status: completed
+- Scope: Closed Stage 7 by the author's decision. Every core item of the plan is implemented and verified: correlated logs, latency/token/retrieval/retry/error records without secrets, deterministic regression sets, and an opt-in budgeted API evaluation; the Langfuse export was verified against Langfuse Cloud.
+- Validation (2026-11-15, before the closing commit):
+  - `ruff check src tests` — passed
+  - `mypy src` — passed: no issues found in 80 source files
+  - `pytest -q -p no:cacheprovider` — passed: 625 passed, 5 skipped; coverage 96%
+  - `git diff --check` — passed
+- Known limits carried forward:
+  - None of the 3 unanswerable questions is refused (answer evaluation, 2026-11-15); the cause is not investigated yet.
+  - Reranking is measured in part (Cohere trial key, 429 on 56 of 96 calls); a complete run needs a pause between cases or a production key. The NVIDIA `nemotron-3.5-rerank-8b` identifier did not work through LiteLLM.
+  - Corrective retrieval is the only measured gain; no default was changed.
+  - `parse_json_object` reads only the first JSON object (a JSON object inside `<think>` makes an action unreadable).
+  - API keys other than the Tavily and Langfuse keys are `str`, not `SecretStr`, in `Settings` (Stage 8).
+  - Not in this stage: a metrics endpoint, Prometheus/Grafana, other OpenTelemetry backends, Langfuse prompt management, token counts for streamed answers without a usage chunk, JSON for Uvicorn's access log.

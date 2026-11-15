@@ -25,6 +25,7 @@ from insightflow.core.exceptions import (
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
+from insightflow.providers.llm import report_response_usage
 
 
 class EmbeddingProvider(Protocol):
@@ -111,6 +112,7 @@ class LiteLLMEmbeddingProvider:
             UnprocessableEntityError,
         ) as exc:
             raise ProviderError from exc
+        report_response_usage(response)
         try:
             vectors = [item["embedding"] for item in response.data]
         except (AttributeError, KeyError, TypeError) as exc:

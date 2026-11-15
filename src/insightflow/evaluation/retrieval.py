@@ -65,6 +65,14 @@ class VariantReport(EvaluationModel):
     name: str
     cases: list[CaseResult] = Field(default_factory=list)
     error: str | None = None
+    provider_calls: dict[str, int] = Field(
+        default_factory=dict, description="Hosted-model calls of the run, by kind."
+    )
+    tokens: int = Field(default=0, description="Reported prompt and completion tokens.")
+    errors: dict[str, int] = Field(
+        default_factory=dict,
+        description="Failures that a step absorbed (for example a failed rerank), by code.",
+    )
 
     def mean(self, field: str, tag: str | None = None) -> float:
         values = [
@@ -181,6 +189,11 @@ def format_reports(reports: Sequence[VariantReport]) -> str:
             f"{report.mean('reciprocal_rank'):>6.3f} {report.mean('passages'):>9.1f} "
             f"{report.mean('context_tokens'):>7.0f} {report.mean('latency_ms'):>7.0f}"
         )
+        if report.errors:
+            absorbed = ", ".join(
+                f"{code} x{count}" for code, count in sorted(report.errors.items())
+            )
+            lines.append(f"{'':<28} absorbed failures: {absorbed}")
     completed = [report for report in reports if report.error is None]
     tags = sorted({tag for report in completed for case in report.cases for tag in case.tags})
     if tags and completed:
@@ -193,3 +206,39 @@ def format_reports(reports: Sequence[VariantReport]) -> str:
                 + " ".join(f"{report.mean('recall', tag):>12.3f}" for tag in tags)
             )
     return "\n".join(lines)
+
+
+BASELINE_METRICS = ("hit", "recall", "reciprocal_rank")
+
+
+def load_reports(path: Path) -> list[VariantReport]:
+    """Read reports written by `python -m insightflow.evaluate --output`."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return [VariantReport.model_validate(item) for item in data]
+
+
+def compare_to_baseline(
+    reports: Sequence[VariantReport],
+    baseline: Sequence[VariantReport],
+    *,
+    tolerance: float,
+) -> list[str]:
+    """Return one line per metric that fell more than `tolerance` below the baseline.
+
+    Only variants present and completed in both runs are compared; a variant that failed now
+    but completed in the baseline is a regression too.
+    """
+    previous = {report.name: report for report in baseline if report.error is None}
+    problems: list[str] = []
+    for report in reports:
+        before = previous.get(report.name)
+        if before is None:
+            continue
+        if report.error is not None:
+            problems.append(f"{report.name}: not run ({report.error})")
+            continue
+        for metric in BASELINE_METRICS:
+            now, then = report.mean(metric), before.mean(metric)
+            if now < then - tolerance:
+                problems.append(f"{report.name}: {metric} {now:.3f} < baseline {then:.3f}")
+    return problems

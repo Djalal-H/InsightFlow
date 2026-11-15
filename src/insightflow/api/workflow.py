@@ -1,5 +1,6 @@
 """Compose the agent workflow from settings and adapters, and map its state to the API."""
 
+import logging
 import uuid
 
 from langchain_core.runnables import RunnableConfig
@@ -26,19 +27,30 @@ from insightflow.agents.observations import (
 from insightflow.agents.state import AgentState, new_turn_input
 from insightflow.api.schemas import (
     ExecutionMetadata,
+    ProviderUsage,
     QueryRequest,
     QueryResponse,
     Source,
     SourceReference,
     StepReport,
+    UsageReport,
     VerificationReport,
     WebSourceReference,
 )
 from insightflow.core.config import Settings
+from insightflow.core.observability import (
+    PROVIDER_KINDS,
+    RunRecorder,
+    TraceSink,
+    export_run,
+)
+from insightflow.providers.instrumented import instrument_chat
 from insightflow.providers.llm import ChatProvider
 from insightflow.rag.models import ContextBudget
 from insightflow.rag.protocols import ContextAssembler, Retriever
 from insightflow.tools.registry import ToolSet
+
+logger = logging.getLogger("insightflow.query")
 
 
 def build_workflow(
@@ -58,6 +70,7 @@ def build_workflow(
     """
     if checkpointer is None:
         memory = None
+    chat_provider = instrument_chat(chat_provider, model=settings.litellm_chat_model)
     tool_set = tools if tools is not None else ToolSet()
     search = DocumentSearch(
         retriever,
@@ -127,8 +140,9 @@ def to_query_response(
     *,
     thread_id: str | None,
     duration_ms: int,
+    recorder: RunRecorder | None = None,
 ) -> QueryResponse:
-    """Map the final workflow state to the public response."""
+    """Map the final workflow state, and the run's records when given, to the public response."""
     observations = state.get("observations", [])
     numbered = number_sources(observations)
     number_by_key = {source_key(source): source.number for source in numbered}
@@ -169,7 +183,79 @@ def to_query_response(
             nodes=state.get("node_trace", []),
             recalled_turns=len(state.get("recalled", [])),
             duration_ms=duration_ms,
+            usage=usage_report(state, recorder),
         ),
+    )
+
+
+def usage_report(state: AgentState, recorder: RunRecorder | None) -> UsageReport:
+    """Counters from the final state, and provider and store totals from the run's records."""
+    observations = state.get("observations", [])
+    searches = [item for item in observations if item.result.tool == SEARCH_TOOL]
+    report = UsageReport(
+        retrieval_calls=len(searches),
+        retrieved_passages=sum(len(item.passages) for item in searches),
+        tool_calls=len(observations) - len(searches),
+        tool_errors=sum(1 for item in observations if item.result.status == "error"),
+        retries=max(state.get("attempt", 1) - 1, 0),
+    )
+    if recorder is None:
+        return report
+    providers: dict[str, ProviderUsage] = {}
+    for kind in PROVIDER_KINDS:
+        totals = recorder.totals(kind)
+        providers[kind] = ProviderUsage(
+            calls=totals.calls,
+            errors=totals.errors,
+            prompt_tokens=totals.prompt_tokens,
+            completion_tokens=totals.completion_tokens,
+            unreported_usage=totals.unreported_usage,
+        )
+    return report.model_copy(
+        update={
+            **providers,
+            "store_calls": len(recorder.store_calls),
+            "errors": dict(recorder.errors),
+            "node_timings_ms": recorder.node_timings_ms(),
+        }
+    )
+
+
+def start_run(recorder: RunRecorder, thread_id: str | None, sink: TraceSink) -> None:
+    """Attach the request's thread to its run, and capture content only when the sink wants it."""
+    recorder.thread_id = thread_id
+    recorder.capture_content = sink.capture_content
+
+
+def finish_run(
+    recorder: RunRecorder,
+    sink: TraceSink,
+    request: QueryRequest,
+    response: QueryResponse | None,
+    *,
+    name: str,
+) -> None:
+    """Log the request's summary line and send the run to the trace sink."""
+    fields = {**recorder.summary(), "outcome": "ok" if response is not None else "error"}
+    if response is not None:
+        fields.update(
+            attempts=response.metadata.attempts,
+            steps=len(response.metadata.steps),
+            sources=len(response.sources),
+            verification=response.verification.status,
+            duration_ms=response.metadata.duration_ms,
+        )
+    logger.info("query completed", extra={"fields": fields})
+    export_run(
+        sink,
+        recorder,
+        name=name,
+        input=request.query,
+        output=response.answer if response is not None else None,
+        metadata={
+            "attempts": response.metadata.attempts if response is not None else None,
+            "verification": response.verification.status if response is not None else None,
+        },
     )
 
 

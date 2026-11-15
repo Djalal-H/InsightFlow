@@ -20,6 +20,7 @@ pythonpath = ["src"]
 markers = [
     "qdrant: needs a running Qdrant server; runs only when QDRANT_TEST_URL is set",
     "tavily: makes a billable Tavily search; runs only when TAVILY_TEST_API_KEY is set",
+    "langfuse: sends one trace to a Langfuse server; runs only when LANGFUSE_TEST_HOST and keys are set",
 ]
 
 [tool.coverage.run]

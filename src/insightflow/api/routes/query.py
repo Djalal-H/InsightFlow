@@ -16,16 +16,20 @@ from insightflow.api.dependencies import (
     RetrieverDependency,
     SettingsDependency,
     ToolSetDependency,
+    TraceSinkDependency,
 )
-from insightflow.api.errors import describe_error
+from insightflow.api.errors import report_error
 from insightflow.api.schemas import ErrorResponse, QueryRequest, QueryResponse
 from insightflow.api.workflow import (
     build_workflow,
+    finish_run,
     resolve_thread,
+    start_run,
     to_query_response,
     turn_input,
 )
 from insightflow.core.exceptions import InsightFlowError
+from insightflow.core.observability import RunRecorder, current_recorder
 
 router = APIRouter(tags=["query"])
 
@@ -44,6 +48,11 @@ def elapsed_ms(started: float) -> int:
     return round((time.perf_counter() - started) * 1000)
 
 
+def request_recorder() -> RunRecorder:
+    """The run opened by `RequestContextMiddleware`; a detached one if the app has none."""
+    return current_recorder() or RunRecorder()
+
+
 @router.post("/query", response_model=QueryResponse, responses=ERROR_RESPONSES)
 async def query(
     request: QueryRequest,
@@ -54,17 +63,28 @@ async def query(
     checkpointer: CheckpointerDependency,
     tools: ToolSetDependency,
     memory: ConversationMemoryDependency,
+    sink: TraceSinkDependency,
 ) -> QueryResponse:
     """Let the agent search documents and call tools, then answer, verify, and cite sources."""
     started = time.perf_counter()
+    recorder = request_recorder()
     thread_id, config = resolve_thread(request.thread_id, checkpointer, settings)
+    start_run(recorder, thread_id, sink)
     graph = build_workflow(
         settings, chat_provider, retriever, assembler, checkpointer, tools=tools, memory=memory
     )
 
-    result = cast(AgentState, await graph.ainvoke(turn_input(request, thread_id), config))
+    try:
+        result = cast(AgentState, await graph.ainvoke(turn_input(request, thread_id), config))
+    except InsightFlowError:
+        finish_run(recorder, sink, request, None, name="query")
+        raise
 
-    return to_query_response(result, thread_id=thread_id, duration_ms=elapsed_ms(started))
+    response = to_query_response(
+        result, thread_id=thread_id, duration_ms=elapsed_ms(started), recorder=recorder
+    )
+    finish_run(recorder, sink, request, response, name="query")
+    return response
 
 
 def node_event(node: str, update: AgentState) -> dict[str, Any]:
@@ -110,10 +130,13 @@ async def query_stream(
     checkpointer: CheckpointerDependency,
     tools: ToolSetDependency,
     memory: ConversationMemoryDependency,
+    sink: TraceSinkDependency,
 ) -> AsyncIterator[ServerSentEvent]:
     """Run the same workflow as POST /query and stream its progress and answer tokens."""
     started = time.perf_counter()
+    recorder = request_recorder()
     thread_id, config = resolve_thread(request.thread_id, checkpointer, settings)
+    start_run(recorder, thread_id, sink)
     graph = build_workflow(
         settings,
         chat_provider,
@@ -145,9 +168,13 @@ async def query_stream(
             elif mode == "values":
                 final_state = cast(AgentState, chunk)
     except InsightFlowError as exc:
-        _, detail = describe_error(exc)
+        _, detail = report_error(exc)
+        finish_run(recorder, sink, request, None, name="query_stream")
         yield ServerSentEvent(event="error", data={"error": detail})
         return
 
-    response = to_query_response(final_state, thread_id=thread_id, duration_ms=elapsed_ms(started))
+    response = to_query_response(
+        final_state, thread_id=thread_id, duration_ms=elapsed_ms(started), recorder=recorder
+    )
+    finish_run(recorder, sink, request, response, name="query_stream")
     yield ServerSentEvent(event="final", data=response.model_dump(mode="json"))

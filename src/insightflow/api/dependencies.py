@@ -9,7 +9,13 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from insightflow.agents.memory import ConversationMemory
 from insightflow.core.config import Settings, get_settings
 from insightflow.core.exceptions import ProviderConfigurationError
+from insightflow.core.observability import NullTraceSink, TraceSink
 from insightflow.providers.embeddings import EmbeddingProvider, LiteLLMEmbeddingProvider
+from insightflow.providers.instrumented import (
+    instrument_chat,
+    instrument_embedding,
+    instrument_rerank,
+)
 from insightflow.providers.llm import ChatProvider, LiteLLMChatProvider
 from insightflow.providers.rerank import LiteLLMRerankProvider, RerankProvider
 from insightflow.rag.composition import build_retriever
@@ -100,17 +106,28 @@ def get_retriever(
 ) -> Retriever:
     """Compose the configured retrieval steps over the embedding provider and the store.
 
-    The chat provider is built only when a configured step needs it.
+    The chat provider is built only when a configured step needs it. Every provider is
+    instrumented, so its calls are recorded in the request's run.
     """
     config = retrieval_config_from_settings(settings)
     needs_chat = config.query_expansion != "off" or config.corrective or config.compress_context
     return build_retriever(
         config,
-        embedding_provider=embedding_provider,
+        embedding_provider=instrument_embedding(
+            embedding_provider, model=settings.litellm_embedding_model
+        ),
         searcher=store,
         reader=store,
-        chat_provider=get_chat_provider(settings) if needs_chat else None,
-        rerank_provider=rerank_provider,
+        chat_provider=(
+            instrument_chat(get_chat_provider(settings), model=settings.litellm_chat_model)
+            if needs_chat
+            else None
+        ),
+        rerank_provider=(
+            instrument_rerank(rerank_provider, model=settings.litellm_rerank_model)
+            if rerank_provider is not None
+            else None
+        ),
     )
 
 
@@ -124,7 +141,9 @@ async def get_conversation_memory(
     store = QdrantMemoryStore(settings)
     try:
         yield ConversationMemory(
-            get_embedding_provider(settings),
+            instrument_embedding(
+                get_embedding_provider(settings), model=settings.litellm_embedding_model
+            ),
             store,
             top_k=settings.memory_top_k,
             score_threshold=settings.memory_score_threshold,
@@ -199,3 +218,31 @@ def get_tool_set(request: Request) -> ToolSet:
 
 
 ToolSetDependency = Annotated[ToolSet, Depends(get_tool_set)]
+
+
+def create_trace_sink(settings: Settings) -> TraceSink:
+    """Build the Langfuse sink when `LANGFUSE_ENABLED`, else one that keeps nothing.
+
+    The Langfuse SDK is imported only here, so the default path never loads it.
+    """
+    if not settings.langfuse_enabled:
+        return NullTraceSink()
+    from insightflow.observability.langfuse_sink import LangfuseTraceSink
+
+    assert settings.langfuse_public_key is not None and settings.langfuse_secret_key is not None
+    return LangfuseTraceSink(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key.get_secret_value(),
+        host=settings.langfuse_host,
+        capture_content=settings.langfuse_capture_content,
+        sample_rate=settings.langfuse_sample_rate,
+    )
+
+
+def get_trace_sink(request: Request) -> TraceSink:
+    """Return the trace sink opened at startup, or one that keeps nothing."""
+    sink: TraceSink | None = getattr(request.app.state, "trace_sink", None)
+    return sink if sink is not None else NullTraceSink()
+
+
+TraceSinkDependency = Annotated[TraceSink, Depends(get_trace_sink)]

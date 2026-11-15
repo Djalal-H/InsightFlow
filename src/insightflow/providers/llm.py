@@ -19,6 +19,7 @@ from litellm.exceptions import (
     Timeout,
     UnprocessableEntityError,
 )
+from litellm.llms.base_llm.chat.transformation import BaseLLMException
 
 from insightflow.core.exceptions import (
     ProviderConfigurationError,
@@ -26,6 +27,7 @@ from insightflow.core.exceptions import (
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
+from insightflow.core.observability import report_usage
 
 ChatMessage = dict[str, Any]
 
@@ -78,6 +80,7 @@ class LiteLLMChatProvider:
                 messages=list(messages),
                 **self._request_options(),
             )
+        report_response_usage(response)
 
         try:
             content = response.choices[0].message.content
@@ -96,6 +99,7 @@ class LiteLLMChatProvider:
                 **self._request_options(),
             )
             async for chunk in response:
+                report_response_usage(chunk)
                 content = _delta_content(chunk)
                 if content:
                     yield content
@@ -126,6 +130,44 @@ def translate_provider_errors() -> Iterator[None]:
         UnprocessableEntityError,
     ) as exc:
         raise ProviderError from exc
+    except BaseLLMException as exc:
+        # Provider adapters that LiteLLM does not map to its own exceptions (for example its
+        # rerank path) raise this base class with the HTTP status.
+        raise _error_for_status(exc.status_code) from exc
+
+
+def _error_for_status(status_code: int) -> ProviderError:
+    if status_code in (401, 403, 404):
+        return ProviderConfigurationError()
+    if status_code == 429:
+        return ProviderRateLimitError()
+    if status_code in (408, 504):
+        return ProviderTimeoutError()
+    return ProviderError()
+
+
+def _token_count(usage: Any, name: str) -> int | None:
+    value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
+def response_usage(response: Any) -> tuple[int | None, int | None]:
+    """The prompt and completion token counts of a LiteLLM response or stream chunk."""
+    usage = response.get("usage") if isinstance(response, dict) else None
+    if usage is None:
+        usage = getattr(response, "usage", None)
+    if usage is None:
+        return None, None
+    return _token_count(usage, "prompt_tokens"), _token_count(usage, "completion_tokens")
+
+
+def report_response_usage(response: Any) -> None:
+    """Report the token use of a response to the active provider call, when it has one."""
+    prompt_tokens, completion_tokens = response_usage(response)
+    if prompt_tokens is not None or completion_tokens is not None:
+        report_usage(prompt_tokens, completion_tokens)
 
 
 def _delta_content(chunk: Any) -> str | None:

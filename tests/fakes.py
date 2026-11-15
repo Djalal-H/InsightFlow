@@ -13,6 +13,7 @@ from insightflow.agents.nodes.agent import AGENT_SYSTEM_PROMPT
 from insightflow.agents.nodes.answer import DIRECT_SYSTEM_PROMPT, GROUNDED_SYSTEM_PROMPT
 from insightflow.agents.nodes.verify import JUDGE_SYSTEM_PROMPT
 from insightflow.core.exceptions import ToolError
+from insightflow.evaluation.answers import ANSWER_JUDGE_SYSTEM_PROMPT
 from insightflow.providers.llm import ChatMessage
 from insightflow.providers.rerank import RerankResult
 from insightflow.rag.corrective import GRADER_SYSTEM_PROMPT
@@ -30,6 +31,7 @@ ROLE_BY_SYSTEM_PROMPT = {
     DECOMPOSE_SYSTEM_PROMPT: "expand",
     GRADER_SYSTEM_PROMPT: "grade",
     COMPRESSOR_SYSTEM_PROMPT: "compress",
+    ANSWER_JUDGE_SYSTEM_PROMPT: "evaluate",
 }
 DEFAULT_REPLIES: dict[str, str] = {
     # An unparseable agent reply makes the agent search the question as written once and then
@@ -42,6 +44,8 @@ DEFAULT_REPLIES: dict[str, str] = {
     "expand": '{"queries": []}',
     "grade": "not json",
     "compress": "not json",
+    # The answer-evaluation judge: the first reference fact is stated, nothing is unsupported.
+    "evaluate": '{"facts": [1], "unsupported_claims": [], "refused": false}',
 }
 
 Reply = str | Exception
@@ -60,7 +64,7 @@ class ScriptedChatProvider:
         for role, reply in replies.items():
             if role not in DEFAULT_REPLIES:
                 raise ValueError(f"unknown role {role}")
-            self.replies[role] = reply if isinstance(reply, list) else [reply]
+            self.replies[role] = list(reply) if isinstance(reply, list) else [reply]
         self.calls: list[tuple[str, list[ChatMessage]]] = []
         self.streamed: list[str] = []
 
