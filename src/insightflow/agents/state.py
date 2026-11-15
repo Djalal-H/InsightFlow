@@ -1,6 +1,7 @@
 """Shared LangGraph workflow state."""
 
 import operator
+from collections.abc import Iterable
 from typing import Annotated, TypedDict
 
 from insightflow.agents.models import (
@@ -19,11 +20,19 @@ class AgentState(TypedDict, total=False):
     field belongs to one turn and is reset by `new_turn_input`, because a checkpointer keeps the
     values of the previous turn.
 
+    `owner` also persists: the owner key (a hash of the token subject) of the thread's creator.
+    The API checks it before a turn starts; nodes do not change it.
+
     `search_scope` holds the request's document filters (`file_types`, `sources`); `recalled`
-    holds older turns that conversation memory found for this question.
+    holds older turns that conversation memory found for this question. `granted_scopes` are
+    the caller's scopes (they decide which tools the agent sees), and `guard_signals` lists what
+    the guardrails found in this turn (codes only, never content). `pending_consequential` marks
+    a pending action that needs approval, and `approved_call` holds the approval ID that the user
+    accepted for it (see `agents/nodes/approve.py`).
     """
 
     history: Annotated[list[ConversationTurn], operator.add]
+    owner: str
     query: str
     thread_id: str | None
     search_scope: dict[str, list[str]]
@@ -35,6 +44,10 @@ class AgentState(TypedDict, total=False):
     feedback: list[str]
     attempt: int
     node_trace: list[str]
+    granted_scopes: list[str]
+    guard_signals: list[str]
+    pending_consequential: bool
+    approved_call: str | None
 
 
 def new_turn_input(
@@ -42,9 +55,16 @@ def new_turn_input(
     *,
     thread_id: str | None = None,
     search_scope: dict[str, list[str]] | None = None,
+    granted_scopes: Iterable[str] = (),
+    guard_signals: Iterable[str] = (),
+    owner: str | None = None,
 ) -> AgentState:
-    """Return the graph input for a new turn, with every per-turn field reset."""
-    return {
+    """Return the graph input for a new turn, with every per-turn field reset.
+
+    `owner` is written only when it is given, so an administrator's turn on another user's
+    thread does not take the thread over.
+    """
+    state: AgentState = {
         "query": query,
         "thread_id": thread_id,
         "search_scope": dict(search_scope or {}),
@@ -56,7 +76,14 @@ def new_turn_input(
         "feedback": [],
         "attempt": 1,
         "node_trace": [],
+        "granted_scopes": sorted(set(granted_scopes)),
+        "guard_signals": list(guard_signals),
+        "pending_consequential": False,
+        "approved_call": None,
     }
+    if owner is not None:
+        state["owner"] = owner
+    return state
 
 
 def attempt_observations(state: AgentState) -> list[Observation]:

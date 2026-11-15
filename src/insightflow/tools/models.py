@@ -13,6 +13,8 @@ ToolErrorCode = Literal[
     "tool_failed",
     "timeout",
     "unavailable",
+    "not_authorized",
+    "not_approved",
 ]
 """Stable failure codes for a tool call.
 
@@ -21,6 +23,9 @@ ToolErrorCode = Literal[
 - `tool_failed`: the server ran the tool and reported an error.
 - `timeout`: the call did not finish before the client's timeout.
 - `unavailable`: the server could not be reached or replied with an unusable result.
+- `not_authorized`: a consequential tool, and the caller may not use such tools (no
+  `tools:consequential` scope, or no conversation storage to pause the run for approval).
+- `not_approved`: the user rejected the call when asked to approve it.
 """
 
 
@@ -32,6 +37,9 @@ class ToolSpec(BaseModel):
     name: str
     description: str = ""
     input_schema: dict[str, Any] = Field(default_factory=dict)
+    consequential: bool = False
+    """True when the tool can change data or send something; it then needs a human approval.
+    The tool set decides this from its registration, never from the server's own hints."""
 
 
 class WebSource(BaseModel):

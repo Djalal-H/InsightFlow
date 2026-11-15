@@ -32,6 +32,9 @@ class ToolRegistration:
     """Per tool: arguments that replace what the model asked for, for example result limits."""
     source_parser: SourceParser | None = None
     """Reads web pages from a successful result of this server's tools."""
+    read_only_tools: frozenset[str] = frozenset()
+    """Tools that only read. Every other tool of the server is consequential (deny by default):
+    MCP annotations such as `readOnlyHint` come from the server and are not trusted."""
 
 
 class ToolSet:
@@ -95,9 +98,19 @@ class ToolSet:
                     )
                     continue
                 owners[spec.name] = registration
-                specs.append(spec)
+                consequential = spec.name not in registration.read_only_tools
+                specs.append(spec.model_copy(update={"consequential": consequential}))
         self._owners = owners
         return specs
+
+    def is_consequential(self, name: str) -> bool:
+        """Whether a tool from the last listing needs approval (unknown tools count as such)."""
+        registration = self._owners.get(name)
+        return registration is None or name not in registration.read_only_tools
+
+    def server_of(self, name: str) -> str:
+        registration = self._owners.get(name)
+        return registration.client.server_name if registration is not None else ""
 
     async def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolResult:
         """Call a tool from the last listing. Like `ToolClient.call_tool`, this never raises."""
@@ -128,6 +141,17 @@ class ToolSet:
             reason,
             self._cooldown,
         )
+
+
+def refused_result(
+    name: str,
+    arguments: Mapping[str, Any],
+    error: ToolErrorCode,
+    output: str,
+    server: str = "",
+) -> ToolResult:
+    """The result for a call that the workflow refused to run; no server is contacted."""
+    return _local_error(name, arguments, error, output, server)
 
 
 def unknown_tool_result(name: str, arguments: Mapping[str, Any]) -> ToolResult:

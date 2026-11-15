@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +46,7 @@ from insightflow.rag.models import ContextBudget, RetrievalQuery
 from insightflow.rag.retrieval import BudgetedContextAssembler
 from insightflow.tools.calculator_server import create_calculator_server
 from insightflow.tools.mcp_client import McpToolClient
-from insightflow.tools.registry import ToolRegistration, ToolSet
+from insightflow.tools.registry import ToolSet
 from insightflow.tools.web_search import parse_tavily_sources
 from tests.fakes import (
     ANSWER,
@@ -55,6 +56,7 @@ from tests.fakes import (
     StaticRetriever,
     action,
     make_candidate,
+    read_only_registration,
     search,
     word_count,
 )
@@ -101,7 +103,7 @@ async def run(graph: AgentGraph, query: str, thread: str | None = None) -> Agent
 
 def calculator_tools() -> ToolSet:
     calculator = McpToolClient(create_calculator_server(), server_name="calculator")
-    return ToolSet([ToolRegistration(calculator)])
+    return ToolSet([read_only_registration(calculator, "calculate")])
 
 
 def tools_called(result: AgentState) -> list[str]:
@@ -171,8 +173,11 @@ async def test_agent_searches_then_answers_and_verifies() -> None:
     )
     assert "Steps left: 3" in second_agent_prompt
     answer_prompt = chat.calls_for("answer")[0][-1]["content"]
-    passage = "[1] PDF/overview.pdf (page 2)\nInsightFlow is an API-first RAG platform."
-    assert passage in answer_prompt
+    assert re.search(
+        r'\[1\] PDF/overview\.pdf \(page 2\)\n<untrusted-(\w+) source="document">\n'
+        r"InsightFlow is an API-first RAG platform\.\n</untrusted-\1>",
+        answer_prompt,
+    )
     assert answer_prompt.endswith("Question: What is InsightFlow?")
 
 
@@ -228,7 +233,11 @@ async def test_mixed_question_searches_then_calculates_with_the_found_number() -
     assert calculation.structured == {"expression": "0.15 * 1200", "value": 180.0, "display": "180"}
     assert result["verification"] == VerificationResult(status="passed", method="llm")
     answer_prompt = chat.calls_for("answer")[0][-1]["content"]
-    assert "[1] PDF/overview.pdf (page 2)\nThe annual tuition fee is 1200 dollars." in answer_prompt
+    assert re.search(
+        r'\[1\] PDF/overview\.pdf \(page 2\)\n<untrusted-\w+ source="document">\n'
+        r"The annual tuition fee is 1200 dollars\.",
+        answer_prompt,
+    )
     assert 'Step 2: calculate {"expression": "0.15 * 1200"} returned:' in answer_prompt
     judge_prompt = chat.calls_for("judge")[0][1]["content"]
     assert "Step 2: calculate" in judge_prompt
@@ -246,7 +255,7 @@ async def test_calculation_without_sources_is_answered_and_not_verified() -> Non
 async def test_web_and_document_sources_share_one_numbering() -> None:
     """Passages and web pages are numbered in the order they were first observed."""
     web = FakeToolClient("tavily", ["tavily_search"], replies={"tavily_search": TAVILY_TEXT})
-    tools = ToolSet([ToolRegistration(web, source_parser=parse_tavily_sources)])
+    tools = ToolSet([read_only_registration(web, source_parser=parse_tavily_sources)])
     chat = ScriptedChatProvider(
         agent=[search("FastAPI"), action("tavily_search", query="FastAPI news"), ANSWER],
         answer="FastAPI is indexed [1] and adds SSE [2].",
@@ -302,7 +311,7 @@ async def test_mcp_tools_cannot_take_the_reserved_search_name() -> None:
     chat = ScriptedChatProvider(agent=[search("x"), ANSWER])
     retriever = StaticRetriever()
 
-    await run(make_graph(chat, retriever, tools=ToolSet([ToolRegistration(shadow)])), "q")
+    await run(make_graph(chat, retriever, tools=ToolSet([read_only_registration(shadow)])), "q")
 
     assert shadow.calls == []
     assert len(retriever.queries) == 1

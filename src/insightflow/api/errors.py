@@ -7,11 +7,18 @@ from fastapi import Request, status
 from fastapi.responses import JSONResponse
 
 from insightflow.core.exceptions import (
+    ApprovalNotFoundError,
+    AuthenticationError,
+    AuthorizationError,
+    InputRejectedError,
     InsightFlowError,
     ProviderConfigurationError,
     ProviderError,
     ProviderRateLimitError,
     ProviderTimeoutError,
+    QuotaExceededError,
+    RateLimiterUnavailableError,
+    RateLimitExceededError,
     StorageError,
     ThreadNotFoundError,
 )
@@ -45,10 +52,56 @@ THREAD_NOT_FOUND_ERROR: Final = {
     "code": "thread_not_found",
     "message": "The conversation thread does not exist.",
 }
+UNAUTHORIZED_ERROR: Final = {
+    "code": "unauthorized",
+    "message": "A valid bearer token is required.",
+}
+FORBIDDEN_ERROR: Final = {
+    "code": "forbidden",
+    "message": "The token does not allow this operation.",
+}
+RATE_LIMITED_ERROR: Final = {
+    "code": "rate_limited",
+    "message": "Too many requests. Wait before you send the next one.",
+}
+QUOTA_EXCEEDED_ERROR: Final = {
+    "code": "quota_exceeded",
+    "message": "The daily usage quota is used up.",
+}
+RATE_LIMITER_UNAVAILABLE_ERROR: Final = {
+    "code": "rate_limiter_unavailable",
+    "message": "Requests cannot be accepted at the moment.",
+}
+INPUT_REJECTED_ERROR: Final = {
+    "code": "input_rejected",
+    "message": "The request was refused by a content policy.",
+}
+APPROVAL_NOT_FOUND_ERROR: Final = {
+    "code": "approval_not_found",
+    "message": "The thread has no pending approval with this identifier.",
+}
+PAYLOAD_TOO_LARGE_ERROR: Final = {
+    "code": "payload_too_large",
+    "message": "The request body is too large.",
+}
 
 
 def describe_error(exc: InsightFlowError) -> tuple[int, dict[str, str]]:
     """Return the HTTP status and fixed public detail for an expected application failure."""
+    if isinstance(exc, AuthenticationError):
+        return status.HTTP_401_UNAUTHORIZED, UNAUTHORIZED_ERROR
+    if isinstance(exc, AuthorizationError):
+        return status.HTTP_403_FORBIDDEN, FORBIDDEN_ERROR
+    if isinstance(exc, RateLimitExceededError):
+        return status.HTTP_429_TOO_MANY_REQUESTS, RATE_LIMITED_ERROR
+    if isinstance(exc, QuotaExceededError):
+        return status.HTTP_429_TOO_MANY_REQUESTS, QUOTA_EXCEEDED_ERROR
+    if isinstance(exc, RateLimiterUnavailableError):
+        return status.HTTP_503_SERVICE_UNAVAILABLE, RATE_LIMITER_UNAVAILABLE_ERROR
+    if isinstance(exc, InputRejectedError):
+        return status.HTTP_400_BAD_REQUEST, INPUT_REJECTED_ERROR
+    if isinstance(exc, ApprovalNotFoundError):
+        return status.HTTP_404_NOT_FOUND, APPROVAL_NOT_FOUND_ERROR
     if isinstance(exc, StorageError):
         return status.HTTP_503_SERVICE_UNAVAILABLE, STORAGE_ERROR
     if isinstance(exc, ThreadNotFoundError):
@@ -62,6 +115,17 @@ def describe_error(exc: InsightFlowError) -> tuple[int, dict[str, str]]:
     if isinstance(exc, ProviderError):
         return status.HTTP_502_BAD_GATEWAY, UPSTREAM_ERROR
     raise TypeError(f"no public mapping for {type(exc).__name__}")
+
+
+def error_headers(exc: InsightFlowError) -> dict[str, str]:
+    """The HTTP headers that a failure needs (RFC 6750 challenge, RFC 9110 Retry-After)."""
+    if isinstance(exc, AuthenticationError):
+        return {"WWW-Authenticate": "Bearer"}
+    if isinstance(exc, AuthorizationError):
+        return {"WWW-Authenticate": 'Bearer error="insufficient_scope"'}
+    if isinstance(exc, RateLimitExceededError | QuotaExceededError):
+        return {"Retry-After": str(exc.retry_after_seconds)}
+    return {}
 
 
 def report_error(exc: InsightFlowError) -> tuple[int, dict[str, str]]:
@@ -81,7 +145,9 @@ async def provider_error_handler(request: Request, exc: Exception) -> JSONRespon
     if not isinstance(exc, ProviderError):
         raise exc
     status_code, detail = report_error(exc)
-    return JSONResponse(status_code=status_code, content={"error": detail})
+    return JSONResponse(
+        status_code=status_code, content={"error": detail}, headers=error_headers(exc)
+    )
 
 
 async def storage_error_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -90,7 +156,9 @@ async def storage_error_handler(request: Request, exc: Exception) -> JSONRespons
     if not isinstance(exc, StorageError):
         raise exc
     status_code, detail = report_error(exc)
-    return JSONResponse(status_code=status_code, content={"error": detail})
+    return JSONResponse(
+        status_code=status_code, content={"error": detail}, headers=error_headers(exc)
+    )
 
 
 async def application_error_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -99,4 +167,6 @@ async def application_error_handler(request: Request, exc: Exception) -> JSONRes
     if not isinstance(exc, InsightFlowError):
         raise exc
     status_code, detail = report_error(exc)
-    return JSONResponse(status_code=status_code, content={"error": detail})
+    return JSONResponse(
+        status_code=status_code, content={"error": detail}, headers=error_headers(exc)
+    )

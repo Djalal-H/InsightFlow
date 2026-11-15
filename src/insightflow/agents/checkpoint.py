@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -64,13 +65,36 @@ def thread_config(thread_id: str) -> RunnableConfig:
     return {"configurable": {"thread_id": thread_id}}
 
 
+@dataclass(frozen=True)
+class StoredThread:
+    """What the latest checkpoint of a thread says about its owner and turns."""
+
+    owner: str | None
+    """`None` for threads written before owners were recorded (Stage 8)."""
+    history: list[ConversationTurn]
+
+
+async def read_thread(
+    checkpointer: BaseCheckpointSaver[str],
+    thread_id: str,
+) -> StoredThread | None:
+    """Return a thread's owner and completed turns, or `None` when it has no checkpoint."""
+    checkpoint = await checkpointer.aget_tuple(thread_config(thread_id))
+    if checkpoint is None:
+        return None
+    values = checkpoint.checkpoint["channel_values"]
+    owner = values.get("owner")
+    history = values.get("history", [])
+    return StoredThread(
+        owner=owner if isinstance(owner, str) and owner else None,
+        history=[turn for turn in history if isinstance(turn, ConversationTurn)],
+    )
+
+
 async def read_thread_history(
     checkpointer: BaseCheckpointSaver[str],
     thread_id: str,
 ) -> list[ConversationTurn] | None:
     """Return a thread's completed turns, or `None` when the thread has no checkpoint."""
-    checkpoint = await checkpointer.aget_tuple(thread_config(thread_id))
-    if checkpoint is None:
-        return None
-    history = checkpoint.checkpoint["channel_values"].get("history", [])
-    return [turn for turn in history if isinstance(turn, ConversationTurn)]
+    thread = await read_thread(checkpointer, thread_id)
+    return thread.history if thread is not None else None

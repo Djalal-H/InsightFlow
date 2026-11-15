@@ -21,6 +21,7 @@ from insightflow.rag.models import Chunk, RetrievalQuery, RetrievedChunk
 from insightflow.rag.query_expansion import DECOMPOSE_SYSTEM_PROMPT, MULTI_QUERY_SYSTEM_PROMPT
 from insightflow.rag.refinement import COMPRESSOR_SYSTEM_PROMPT
 from insightflow.tools.models import ToolErrorCode, ToolResult, ToolSpec
+from insightflow.tools.registry import ToolRegistration
 
 ROLE_BY_SYSTEM_PROMPT = {
     AGENT_SYSTEM_PROMPT: "agent",
@@ -51,6 +52,18 @@ DEFAULT_REPLIES: dict[str, str] = {
 Reply = str | Exception
 
 
+def role_of(messages: Sequence[ChatMessage]) -> str:
+    """The workflow role of a request, by its system prompt.
+
+    A prefix match: the answer prompts end with a random per-answer canary.
+    """
+    content = messages[0]["content"]
+    for prompt, role in ROLE_BY_SYSTEM_PROMPT.items():
+        if content == prompt or content.startswith(prompt):
+            return role
+    raise KeyError(content[:80])
+
+
 class ScriptedChatProvider:
     """Replies to each workflow prompt by its role and records every request.
 
@@ -75,7 +88,7 @@ class ScriptedChatProvider:
         return [role for role, _ in self.calls]
 
     async def complete(self, messages: Sequence[ChatMessage]) -> str:
-        role = ROLE_BY_SYSTEM_PROMPT[messages[0]["content"]]
+        role = role_of(messages)
         self.calls.append((role, list(messages)))
         queue = self.replies[role]
         reply = queue.pop(0) if len(queue) > 1 else queue[0]
@@ -278,3 +291,72 @@ def search(query: str) -> str:
 
 
 ANSWER = '{"thought": "Enough.", "action": "answer"}'
+
+
+def read_only_registration(client: Any, *names: str, **options: Any) -> ToolRegistration:
+    """A registration whose tools are all read-only (no approval needed).
+
+    `names` default to a `FakeToolClient`'s tools; pass them for a real MCP client.
+    """
+    tools = names or tuple(spec.name for spec in getattr(client, "specs", []))
+    return ToolRegistration(client, read_only_tools=frozenset(tools), **options)
+
+
+TEST_JWT_SECRET = "test-secret-that-is-long-enough-0123456789"
+TEST_ISSUER = "https://issuer.test/"
+TEST_AUDIENCE = "insightflow"
+AUTH_SETTINGS: dict[str, Any] = {
+    "auth_enabled": True,
+    "auth_jwt_secret": TEST_JWT_SECRET,
+    "auth_jwt_algorithms": "HS256",
+    "auth_jwt_issuer": TEST_ISSUER,
+    "auth_jwt_audience": TEST_AUDIENCE,
+}
+
+
+def make_token(
+    subject: str = "alice",
+    scope: str = "query threads:read threads:delete",
+    *,
+    secret: str = TEST_JWT_SECRET,
+    expires_in: int = 300,
+    **claims: Any,
+) -> str:
+    """An HS256 access token for `AUTH_SETTINGS`."""
+    import time
+
+    import jwt
+
+    now = int(time.time())
+    payload: dict[str, Any] = {
+        "sub": subject,
+        "scope": scope,
+        "iss": TEST_ISSUER,
+        "aud": TEST_AUDIENCE,
+        "iat": now,
+        "exp": now + expires_in,
+        **claims,
+    }
+    return jwt.encode({k: v for k, v in payload.items() if v is not None}, secret, "HS256")
+
+
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+class FailingStreamProvider(ScriptedChatProvider):
+    """Streams `tokens_before_failure` pieces of the answer, then raises `error`."""
+
+    def __init__(self, error: Exception, tokens_before_failure: int = 2, **replies: Any) -> None:
+        super().__init__(**replies)
+        self.error = error
+        self.tokens_before_failure = tokens_before_failure
+
+    async def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[str]:
+        sent = 0
+        async for piece in super().stream(messages):
+            if sent == self.tokens_before_failure:
+                raise self.error
+            sent += 1
+            yield piece
+        raise self.error

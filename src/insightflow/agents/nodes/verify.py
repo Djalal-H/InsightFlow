@@ -11,6 +11,7 @@ from insightflow.agents.models import JudgeVerdict, VerificationResult
 from insightflow.agents.observations import has_evidence, number_sources, render_observations
 from insightflow.agents.state import AgentState
 from insightflow.agents.structured import complete_json
+from insightflow.guardrails.spotlight import UNTRUSTED_RULE
 from insightflow.providers.llm import ChatProvider
 
 CITATION_PATTERN = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
@@ -22,7 +23,8 @@ JUDGE_SYSTEM_PROMPT = (
     "Set grounded to true only if the observations support every factual claim in the answer. "
     "A value that a tool calculated counts as supported. "
     "A statement that the observations do not contain the answer is not a factual claim. "
-    "List each unsupported claim in a few words."
+    "List each unsupported claim in a few words. "
+    + UNTRUSTED_RULE
 )
 
 
@@ -49,7 +51,7 @@ def check_citations(answer: str, source_count: int) -> list[str]:
     return []
 
 
-def make_verify_node(judge: ChatProvider | None) -> AgentNode:
+def make_verify_node(judge: ChatProvider | None, *, datamark_web: bool = False) -> AgentNode:
     """Bind the optional LLM judge. Without one, only deterministic checks run."""
 
     async def verify_node(state: AgentState) -> AgentState:
@@ -68,12 +70,13 @@ def make_verify_node(judge: ChatProvider | None) -> AgentNode:
         if judge is None:
             return {"verification": VerificationResult(status="passed", method="deterministic")}
 
+        rendered = render_observations(observations, datamark_web=datamark_web)
         messages = [
             {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
-                    f"Observations:\n{render_observations(observations)}\n\n"
+                    f"Observations:\n{rendered}\n\n"
                     f"Question: {state['query']}\n\nAnswer: {answer}"
                 ),
             },

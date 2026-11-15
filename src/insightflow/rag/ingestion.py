@@ -10,6 +10,7 @@ from insightflow.rag.chunkers import MaxMinSemanticChunker, StructureRecursiveCh
 from insightflow.rag.config import ChunkingConfig, EmbeddingConfig, IngestionConfig
 from insightflow.rag.identity import canonicalize_source_identifier
 from insightflow.rag.models import (
+    MIME_TYPES_BY_SUFFIX,
     Chunk,
     DocumentElement,
     DocumentSource,
@@ -31,14 +32,6 @@ from insightflow.rag.protocols import (
 )
 
 UNKNOWN_MIME_TYPE = "application/octet-stream"
-MIME_TYPES_BY_SUFFIX: Mapping[str, str] = {
-    ".txt": "text/plain",
-    ".md": "text/markdown",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".pdf": "application/pdf",
-}
-
-
 def discover_sources(corpus_dir: Path) -> list[DocumentSource]:
     """List every non-hidden file under an explicit corpus directory in a stable order."""
     if not corpus_dir.is_dir():

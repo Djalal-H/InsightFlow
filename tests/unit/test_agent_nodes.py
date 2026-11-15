@@ -29,7 +29,7 @@ from insightflow.agents.state import AgentState, history_messages, new_turn_inpu
 from insightflow.rag.models import ContextBudget
 from insightflow.rag.retrieval import BudgetedContextAssembler
 from insightflow.tools.models import ToolResult, WebSource
-from insightflow.tools.registry import ToolRegistration, ToolSet
+from insightflow.tools.registry import ToolSet
 from tests.fakes import (
     ANSWER,
     FakeToolClient,
@@ -37,6 +37,7 @@ from tests.fakes import (
     StaticRetriever,
     action,
     make_candidate,
+    read_only_registration,
     search,
     word_count,
 )
@@ -156,8 +157,16 @@ def test_render_observations_describes_each_outcome() -> None:
     rendered = render_observations(observations)
 
     assert 'Step 1: search_documents {"query": "nothing"} found no sources.' in rendered
-    assert "Step 2: calculate {} failed (tool_failed): bad input" in rendered
-    assert 'Step 3: calculate {"expression": "6*7"} returned: 42' in rendered
+    # Tool output is untrusted: it is in a spotlight block that only this nonce closes.
+    rendered = render_observations(observations, nonce="n0")
+    assert (
+        'Step 2: calculate {} failed (tool_failed):\n<untrusted-n0 source="tool">\nbad input\n'
+        "</untrusted-n0>" in rendered
+    )
+    assert (
+        'Step 3: calculate {"expression": "6*7"} returned:\n<untrusted-n0 source="tool">\n42\n'
+        "</untrusted-n0>" in rendered
+    )
     assert render_observations([]) == "No observations yet."
 
 
@@ -178,7 +187,7 @@ def test_has_evidence() -> None:
 
 async def test_agent_sends_history_catalog_question_and_budget() -> None:
     chat = ScriptedChatProvider(agent=search("Who builds InsightFlow?"))
-    tools = ToolSet([ToolRegistration(FakeToolClient("fake", ["lookup"]))])
+    tools = ToolSet([read_only_registration(FakeToolClient("fake", ["lookup"]))])
     node = make_agent_node(chat, tools, max_steps=3, history_turns=1)
 
     update = await node(turn("Who builds it?", history=HISTORY))
@@ -311,7 +320,7 @@ async def test_act_rejects_invalid_search_arguments_without_searching(
 
 async def test_act_sends_other_actions_to_the_tool_set() -> None:
     client = FakeToolClient("fake", ["lookup"])
-    tools = ToolSet([ToolRegistration(client)])
+    tools = ToolSet([read_only_registration(client)])
     await tools.list_tools()
     node = make_act_node(document_search(), tools)
 
@@ -337,9 +346,11 @@ async def test_direct_answer_uses_history_and_no_observations() -> None:
 
     update = await node(turn("thanks", history=HISTORY))
 
-    assert update == {"answer": "Hello! Ask me about the indexed documents."}
-    assert chat.calls_for("direct")[0] == [
-        {"role": "system", "content": DIRECT_SYSTEM_PROMPT},
+    assert update == {"answer": "Hello! Ask me about the indexed documents.", "guard_signals": []}
+    [system, *rest] = chat.calls_for("direct")[0]
+    # The system prompt ends with this answer's canary (see `guardrails/output.py`).
+    assert system["content"].startswith(DIRECT_SYSTEM_PROMPT + " Confidential session marker: ")
+    assert rest == [
         {"role": "user", "content": "Who builds it?"},
         {"role": "assistant", "content": "I do not know."},
         {"role": "user", "content": "thanks"},

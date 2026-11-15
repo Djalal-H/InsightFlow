@@ -1,0 +1,6 @@
+# Ingestion CLI: the API runtime plus the document parsers (docling brings a large model stack).
+-r requirements.txt
+
+markdown==3.10.3
+docling==2.117.0
+pypdf==6.14.2

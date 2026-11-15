@@ -62,6 +62,18 @@ _ERROR_CODES: tuple[tuple[type[BaseException], str], ...] = (
 )
 
 
+
+
+def register_error_code(error_type: type[BaseException], code: str) -> None:
+    """Give another layer's exception type a stable code (first match wins, so it goes first).
+
+    The agent layer uses it for LangGraph's pause signal, which is not a failure.
+    """
+    global _ERROR_CODES
+    if all(existing is not error_type for existing, _ in _ERROR_CODES):
+        _ERROR_CODES = ((error_type, code), *_ERROR_CODES)
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -154,6 +166,8 @@ class RunRecorder:
     ) -> None:
         self.request_id = request_id or uuid.uuid4().hex
         self.thread_id = thread_id
+        self.user: str | None = None
+        """A pseudonymous user key (a hash of the token subject), never the subject itself."""
         self.capture_content = capture_content
         self.budget = budget or CallBudget()
         self.started_at = _now()

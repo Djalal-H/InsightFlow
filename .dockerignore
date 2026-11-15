@@ -1,0 +1,7 @@
+# Only the lock files and src/ go into the images.
+*
+!requirements.lock
+!requirements-ingest.lock
+!src/
+src/**/__pycache__
+src/**/*.py[cod]

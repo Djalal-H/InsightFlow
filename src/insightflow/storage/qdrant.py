@@ -5,7 +5,7 @@ from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
 
-from insightflow.core.config import Settings
+from insightflow.core.config import Settings, secret_text
 from insightflow.core.exceptions import StorageError
 from insightflow.core.observability import store_call
 from insightflow.rag.config import DistanceMetric, EmbeddingConfig
@@ -74,7 +74,7 @@ class QdrantStore:
         self._upload_batch_size = settings.rag_upload_batch_size
         self._client = client or AsyncQdrantClient(
             url=settings.qdrant_url,
-            api_key=settings.qdrant_api_key or None,
+            api_key=secret_text(settings.qdrant_api_key),
         )
 
     async def is_available(self) -> bool:

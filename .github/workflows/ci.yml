@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # LiteLLM reads its bundled model registry instead of downloading one at import.
+  LITELLM_LOCAL_MODEL_COST_MAP: "True"
+  UV_TORCH_BACKEND: cpu
+
+jobs:
+  checks:
+    name: Lint, types, tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.7.3"
+          enable-cache: true
+          cache-dependency-glob: "requirements*.txt\nrequirements*.lock"
+      - name: Install dependencies (locked versions)
+        run: |
+          uv venv .venv --python "${{ matrix.python }}"
+          uv pip install --python .venv/bin/python -r requirements-dev.txt -c requirements-ingest.lock
+      - name: Ruff
+        run: .venv/bin/ruff check src tests
+      - name: Mypy (strict)
+        run: .venv/bin/mypy src
+      - name: Pytest (default suite, no credentials or services)
+        run: .venv/bin/pytest
+      - name: Whitespace errors
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git diff --check "origin/${BASE_REF}...HEAD"
+
+  services:
+    name: Tests against Redis and Qdrant
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      redis:
+        image: redis:8.4.0-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+      qdrant:
+        image: qdrant/qdrant:v1.18.2
+        ports: ["6333:6333"]
+    env:
+      REDIS_TEST_URL: redis://localhost:6379/0
+      QDRANT_TEST_URL: http://localhost:6333
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.7.3"
+          enable-cache: true
+          cache-dependency-glob: "requirements*.txt\nrequirements*.lock"
+      - name: Install dependencies (locked versions)
+        run: |
+          uv venv .venv --python 3.13
+          uv pip install --python .venv/bin/python -r requirements-dev.txt -c requirements-ingest.lock
+      - name: Wait for Qdrant
+        run: |
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:6333/readyz && exit 0
+            sleep 2
+          done
+          exit 1
+      - name: Pytest (redis and qdrant markers)
+        run: .venv/bin/pytest -m "redis or qdrant" --no-cov
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the API image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: api
+          tags: insightflow-api:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      - name: Smoke test the API image
+        run: |
+          docker run -d --name api -p 8000:8000 --read-only --tmpfs /tmp \
+            -e CHECKPOINT_BACKEND=memory insightflow-api:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health/live; then
+              docker exec api python -c "import sys, insightflow.main; sys.exit('docling' in sys.modules)"
+              test "$(docker exec api id -u)" = "10001"
+              docker rm -f api
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs api
+          exit 1
+      - name: Build the ingestion image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: ingest
+          tags: insightflow-ingest:ci
+          push: false
+          cache-from: type=gha,scope=ingest
+          cache-to: type=gha,mode=max,scope=ingest
+
+  audit:
+    name: Dependency vulnerabilities
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.7.3"
+      - name: pip-audit (API lock)
+        run: uvx --python 3.13 pip-audit==2.10.0 --requirement requirements.lock --no-deps --disable-pip --progress-spinner off

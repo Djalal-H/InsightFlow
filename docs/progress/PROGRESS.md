@@ -2,9 +2,9 @@
 
 ## Current status
 
-- Current stage: Stage 7 complete on `feature/stage7-observability` (closed by the author's decision on 2026-11-15). Structured logs with request IDs, usage in the response, a Langfuse sink verified against Langfuse Cloud, two regression sets, a retrieval baseline check, and a budgeted answer evaluation are implemented; answer quality and the Stage 6 chat-backed options are measured on hosted models. Reranking is measured in part only (rate-limited Cohere trial key).
+- Current stage: Stage 8 complete (closed by the author's decision on 2026-11-15). Authentication, rate limits and quotas, secret handling, prompt-injection guardrails, human approval of consequential tools, Docker images, CI, backup/restore, failure simulations, and a load-test script are implemented and verified with mocks, fakeredis, a real Redis and Qdrant, and local Docker builds. No hosted-model run of the guardrails was made.
 - Last updated: 2026-11-15
-- Overall state: in progress
+- Overall state: Stage 8 complete
 
 ## Stage summary
 
@@ -17,7 +17,7 @@
 | Stage 5 | complete | MCP client adapter with per-call controls, calculator MCP server, ReAct agent loop with document search as a tool, Tavily web search with web sources, and a tool server cooldown, verified with mocks and in-process servers; the opt-in Tavily test and three hosted-model queries passed (2026-11-10) |
 | Stage 6 | complete | All candidates implemented and verified with mocks and on a real Qdrant server. Measured on 48 labeled questions with hosted embeddings: the `input_type` fix raised the dense hit rate from 0.500 to 0.979; hybrid and neighbor expansion gave no gain after it. Closed by the author's decision with the chat-backed options, reranking, and memory not measured on hosted models |
 | Stage 7 | complete | Request IDs, JSON logs, `metadata.usage`, and an opt-in Langfuse sink (real export to Langfuse Cloud verified); structured-output and workflow regression sets in the default suite; retrieval baseline check; budgeted answer evaluation run on hosted models (2026-11-15). Closed by the author's decision with reranking measured in part and the refusal failures open |
-| Stage 8 | not started | —                                                                                                          |
+| Stage 8 | complete | All core items implemented; default suite 773 passed; `redis`/`qdrant` tests passed on real servers; both images built and the API image smoke-tested; backup and a restore drill run on local data. Closed by the author's decision with no hosted-model check of the guardrails and the safety classifier |
 
 ## Work log
 
@@ -669,3 +669,49 @@
   - `parse_json_object` reads only the first JSON object (a JSON object inside `<think>` makes an action unreadable).
   - API keys other than the Tavily and Langfuse keys are `str`, not `SecretStr`, in `Settings` (Stage 8).
   - Not in this stage: a metrics endpoint, Prometheus/Grafana, other OpenTelemetry backends, Langfuse prompt management, token counts for streamed answers without a usage chunk, JSON for Uvicorn's access log.
+
+### 2026-11-15 — Stage 8 security and production readiness
+
+- Stage: Stage 8
+- Status: complete (closed by the author's decision, 2026-11-15)
+- Scope: Implemented every core item of Stage 8 on `feature/stage8-security-production`, with the author's choices: JWT, Redis, GitHub Actions, a human approval step (LangGraph `interrupt`) for consequential tools, two image targets, and one branch.
+- Changed:
+  - `security/` (new): `auth.py` (JWT verification: JWKS or HS256, algorithm allowlist, required `exp`/`sub`, `iss`/`aud`; scopes; principals), `rate_limit.py` (GCRA + daily request/token quotas in one Redis Lua script), `audit.py`.
+  - `api/security.py` (new): principal, scope, and rate-limit dependencies. Every route except `/health/*` checks scopes; threads have an owner (404 for others).
+  - `guardrails/` (new): invisible-text removal, heuristic screen, spotlighting, answer checks (canary, exfiltration links, secrets, size), optional Llama Guard classifier, screening of tool results (`untrusted.py`).
+  - `agents/nodes/approve.py` (new), `agents/graph.py`, `agents/nodes/act.py`, `agents/nodes/agent.py`, `tools/registry.py`, `tools/models.py`: deny-by-default consequential tools, the `approve` node, a second check in `act`; `api/routes/approvals.py` (new).
+  - `core/config.py`: `SecretStr` for every credential, `SECRETS_DIR`, Stage 8 settings, production checks. `core/logging.py`: JWT redaction, quiet third-party loggers, `user` field. `providers/*`: `num_retries` (`PROVIDER_MAX_RETRIES`); LiteLLM message logging off.
+  - `api/middleware.py`: body limit (413), `nosniff`, `no-store`. `main.py`: rate limiter in the lifespan, docs toggle. `api/routes/health.py`: Redis readiness.
+  - `rag/__init__.py` (lazy exports), `rag/models.py` (`MIME_TYPES_BY_SUFFIX`): the API no longer imports docling, pypdf, markdown, or torch.
+  - `storage/backup.py`, `storage/redis.py`, `insightflow/ops.py` (new): backup, restore, alias switch, thread pruning.
+  - `Dockerfile`, `.dockerignore`, `compose.yaml` (Redis, `api` profile), `.github/workflows/ci.yml`, `.github/dependabot.yml`.
+  - `requirements.txt` (all direct runtime dependencies pinned; `PyJWT[crypto]`, `redis`, `httpx` added), `requirements-ingest.txt` (new: docling, pypdf, markdown), `requirements-dev.txt` (`fakeredis[lua]`), `requirements.lock`, `requirements-ingest.lock` (new, `uv pip compile`, CPU-only torch).
+  - `scripts/load_test.py`, `scripts/issue_dev_token.py` (new); `evaluation/injection_cases.jsonl` (34 cases, new).
+  - Tests (new): `test_app_imports.py`, `test_security_settings.py`, `test_auth.py`, `test_rate_limit.py`, `test_guardrails.py`, `test_injection_regression.py`, `test_backup.py`, `test_log_hygiene.py`, `test_security_api.py`, `test_guardrails_api.py`, `test_approvals_api.py`, `test_failure_simulation.py`. Changed tests: tool sets declare read-only tools; prompt assertions follow the spotlight format; responses have `status`, `pending_approval`, and `metadata.guardrails`.
+  - Docs: `README.md` (Security; Docker, CI, and operations; Dependencies), `docs/operations.md` (new), `.env.example`, `CLAUDE.md`, `docs/Implement Plan Draft.md`, `docs/Project Overview.md`.
+- Validation (2026-11-15):
+  - `.venv/bin/ruff check src tests scripts` — passed
+  - `.venv/bin/mypy src` — passed: no issues found in 97 source files
+  - `.venv/bin/pytest -q -p no:cacheprovider` — passed: 773 passed, 7 skipped; coverage 94%
+  - `git diff --check` (with new files marked intent-to-add) — passed
+  - `REDIS_TEST_URL=redis://localhost:16379/0 QDRANT_TEST_URL=http://localhost:6333 .venv/bin/pytest -q -p no:cacheprovider --no-cov -m "redis or qdrant"` — passed: 5 passed (a throwaway `redis:8.4.0-alpine` container and the local Qdrant 1.18.2)
+  - `docker build --network host --target api -t insightflow-api:stage8 .` — passed: 404 MB. Without `--network host`, the local Docker build network could not resolve PyPI (a local DNS problem, not the Dockerfile).
+  - `docker build --network host --target ingest -t insightflow-ingest:stage8 .` — passed: 1.73 GB; `torch 2.15.0+cpu`, CUDA not available; `--help` runs.
+  - API image smoke test (`docker run --read-only --tmpfs /tmp -e CHECKPOINT_BACKEND=memory`): `/health/live` 200, health check `healthy`, user 10001, `docling` and `torch` not loaded, no `Server` header, `nosniff` present.
+  - Containers with `AUTH_ENABLED=true` (HS256), `RATE_LIMIT_ENABLED=true`, burst 2, 1 request per minute, a Redis container, and no model configured: no token → 401; with a token from `scripts/issue_dev_token.py` → 503 `provider_configuration_error`, 503, then 429 `rate_limited` with `Retry-After: 60`; `/health/ready` reports `"redis": "available"`.
+  - `PYTHONPATH=src python -m insightflow.ops backup --out <scratch>/backup-e2e` (local `.env`, Qdrant, and checkpoints) — passed: `insightflow_trial` (28 points) and `checkpoints.sqlite`; checksums verified; no snapshot left on the server.
+  - Restore drill: `QDRANT_URL=http://localhost:16333 CHECKPOINT_SQLITE_PATH=<scratch>/drill/checkpoints.sqlite PYTHONPATH=src python -m insightflow.ops restore --from <scratch>/backup-e2e --checkpoints` into a throwaway Qdrant container — passed: 28 points and 6 threads restored, no warnings.
+  - `PYTHONPATH=src python scripts/load_test.py --in-process --clients 20 --requests 400` (20 ms simulated per model call) — 400 × 200, 59.0 requests/s, p50 304 ms, p95 523 ms, p99 565 ms.
+  - `PYTHONPATH=src python scripts/load_test.py --in-process --clients 10 --requests 200 --rate-limit 60 --burst 5` — 70 × 200 and 130 × 429 `rate_limited`: each of the 10 users got its burst of 5 plus the refill in 2.4 s, as configured.
+- Findings:
+  - The API process imported docling and torch through `rag/__init__.py` and `agents/document_search.py`; fixed, and a test keeps it so.
+  - `tests/unit/test_retriever_composition.py` printed the value of `LITELLM_RERANK_API_KEY` from `.env` in an assertion message (LiteLLM loads `.env` into the environment); the test now sets the key explicitly. The value appeared only in the local test output.
+  - The screen had a bug (a generator is always true, so every Base64 run counted as a payload); the benign Base64 case of the regression set found it.
+  - In-process, one request costs about 17 ms of CPU in the app (graph build, routing, guards) besides the model calls; throughput is bounded by one process's event loop.
+- Decisions:
+  - Secure defaults stay off outside production (auth, rate limits) so local work and the existing tests need no token; production refuses to start without them.
+  - Tools are consequential unless the registration lists them as read-only; MCP `readOnlyHint` is not trusted.
+  - The safety classifier fails open (an extra layer); the rate limiter fails closed by default.
+- Remaining:
+  - A hosted-model check that the spotlight rule and the canary do not lower answer quality (`python -m insightflow.evaluate_answers`, billable; needs the author's approval of the estimate), and an optional live check of `GUARD_SAFETY_MODEL`.
+  - Not in this stage (see `docs/Implement Plan Draft.md`): CaMeL-style dual-model execution, an injection-specific hosted classifier, hidden-text checks at ingestion, streaming of a resumed approval run, per-tenant quotas, image signing and publishing.

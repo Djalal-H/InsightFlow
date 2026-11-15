@@ -1,6 +1,7 @@
 """Standard-library logging configuration: text or JSON lines, request context, redaction.
 
-Every record gets the `request_id`, `thread_id`, and workflow `node` of the active run (see
+Every record gets the `request_id`, `thread_id`, `user` (a hash), and workflow `node` of the
+active run (see
 `core.observability`). Structured values are passed as `extra={"fields": {...}}`. The formatted
 line is redacted: configured secrets and bearer tokens never reach the output.
 """
@@ -20,7 +21,11 @@ _HANDLER_MARK = "_insightflow_handler"
 _TOKEN_PATTERNS = (
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"\b(?:tvly|nvapi|sk-lf|pk-lf|sk)-[A-Za-z0-9_-]{8,}"),
+    # A JWT (header.payload.signature), for example an access token in an error message.
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"),
 )
+QUIET_LOGGERS = ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy", "httpx", "httpcore", "openai")
+"""Third-party loggers that can write request or response bodies at DEBUG; kept at WARNING."""
 _MIN_SECRET_LENGTH = 6
 
 
@@ -32,6 +37,8 @@ def context_fields() -> dict[str, Any]:
         fields["request_id"] = recorder.request_id
         if recorder.thread_id is not None:
             fields["thread_id"] = recorder.thread_id
+        if recorder.user is not None:
+            fields["user"] = recorder.user
     node = current_node()
     if node is not None:
         fields["node"] = node
@@ -134,3 +141,5 @@ def configure_logging(
     handler.setFormatter(formatter)
     root.addHandler(handler)
     root.setLevel(level.upper())
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)

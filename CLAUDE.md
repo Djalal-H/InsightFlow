@@ -27,7 +27,16 @@ PYTHONPATH=src python -m insightflow.evaluate --variants dense,hybrid   # billab
 PYTHONPATH=src python -m insightflow.evaluate_answers --dry-run          # answer eval estimate (run is billable)
 LOG_FORMAT=json uvicorn insightflow.main:app --app-dir src               # JSON log lines with request_id
 PYTHONPATH=src python scripts/manual_chat_test.py "prompt"   # real provider call (billable)
+REDIS_TEST_URL=redis://localhost:6379/0 pytest -m redis      # opt-in: the rate-limit Lua script
+PYTHONPATH=src python -m insightflow.ops backup --out DIR    # also restore, switch-alias, prune-threads
+PYTHONPATH=src python scripts/load_test.py --in-process      # load test with fakes (no cost)
+PYTHONPATH=src python scripts/issue_dev_token.py --sub dev   # HS256 token for AUTH_ENABLED=true
+docker build --target api -t insightflow-api .              # also --target ingest
 ```
+
+Install from `requirements-dev.txt` (which includes `requirements-ingest.txt` and
+`requirements.txt`); images and CI use the `requirements*.lock` files (regenerate with
+`uv pip compile`, see README "Dependencies").
 
 `asyncio_mode = "auto"`, so async tests need no decorator. The default suite must run with no
 credentials and no Qdrant; mock provider calls.
@@ -117,6 +126,42 @@ Every technique is off by default (`RAG_*`, `LITELLM_RERANK_MODEL`, `AGENT_MULTI
   `RunBudget` over the run; `BudgetExceededError` stops it with a partial report.
   `insightflow/evaluate.py --baseline` exits 3 on a retrieval regression.
 
+### Security and production readiness (Stage 8)
+
+Every protection is a setting; `APP_ENV=production` refuses to start without auth (issuer and
+audience), rate limits, and JSON logs (`core/config.py:_validate_security`). Credentials are
+`SecretStr`; read them with `secret_text()`, and add new ones to `Settings.secret_values()`.
+
+- Auth: `security/auth.py` (`JwtVerifier`, `Principal`, scopes `query`, `threads:read`,
+  `threads:delete`, `tools:consequential`, `admin`) and `api/security.py` (`get_principal`,
+  `require_scopes`, `AdmittedPrincipal` = `query` scope + rate limit). With
+  `AUTH_ENABLED=false` (the default) the caller is `LOCAL_PRINCIPAL` with every scope, so
+  existing API tests need no token. Tests use `tests/fakes.py:AUTH_SETTINGS`, `make_token`.
+- Thread owners: `AgentState.owner` (sha256 of `sub`, persistent, written by
+  `api/workflow.py:open_thread`); another user's or an ownerless thread is 404 unless `admin`.
+- Rate limits: `security/rate_limit.py:RedisRateLimiter` (one Lua script: token quota, request
+  quota, GCRA), on `app.state.rate_limiter` from the lifespan; `get_rate_limiter` is `None`
+  without a lifespan. Tests use `fakeredis` (Lua included) and override `get_rate_limiter`.
+- Guardrails (`guardrails/`): `act` screens results (`untrusted.py`, web pages dropped by
+  default); `render_observations` puts untrusted text in nonce-tagged spotlight blocks; the
+  answer node adds a per-answer canary to its system prompt and runs `AnswerGuard`; signals go
+  to `AgentState.guard_signals` → `metadata.guardrails`. `ScriptedChatProvider` matches system
+  prompts by prefix because of the canary. `evaluation/injection_cases.jsonl` is a regression
+  set: benign false positives fail it too.
+- Consequential tools: a tool is consequential unless `ToolRegistration.read_only_tools` lists
+  it (deny by default; use `tests/fakes.py:read_only_registration` for read-only fakes). The
+  agent sets `pending_consequential` from the catalog (never from model output); the graph routes
+  `agent → approve`, which calls `interrupt` (deterministic `approval_id_for`, because the node
+  runs again on resume). `api/routes/approvals.py` resumes with `Command(resume=...)`; `act`
+  refuses a consequential call without a matching `approved_call`. A new `/query` on the thread
+  drops the pause.
+- HTTP: `BodySizeLimitMiddleware` (413), `nosniff`, `no-store` on `/query` and `/threads`,
+  docs off in production. `register_error_code(GraphInterrupt, "paused")` keeps a pause out of
+  the error counts.
+- Ops: `storage/backup.py` + `insightflow/ops.py`; procedures in `docs/operations.md`.
+- The API must not import docling or torch (`tests/unit/test_app_imports.py`): `rag/__init__.py`
+  exports them lazily, and `MIME_TYPES_BY_SUFFIX` lives in `rag/models.py`.
+
 ### Query workflow (ReAct, Stages 4–5)
 
 `api/routes/query.py` serves `POST /query` and `POST /query/stream` (SSE, FastAPI's native
@@ -124,8 +169,8 @@ Every technique is off by default (`RAG_*`, `LITELLM_RERANK_MODEL`, `AGENT_MULTI
 dependencies in `api/dependencies.py`, pass the run config from `resolve_thread` (it always sets
 `recursion_limit`; the default bounds exceed LangGraph's 25), and map the final state with
 `to_query_response`. The graph (`agents/graph.py`) is `agent ⇄ act → answer → verify ⇄ retry →
-finalize` (no observations: `answer → finalize`); routing functions are pure and tested without a
-model.
+finalize` (no observations: `answer → finalize`; consequential tools: `agent → approve → act`);
+routing functions are pure and tested without a model.
 
 - `agent` (`nodes/agent.py`) asks for one prompted-JSON `AgentAction` per step and only decides;
   `act` runs it. Every agent run schedules one new action or `answer`: the step budget
@@ -148,7 +193,8 @@ model.
 - `GET/DELETE /threads/{id}` (`api/routes/threads.py`) read and delete checkpointed history.
 
 API tests override `get_settings`, `get_chat_provider`, `get_retriever`, `get_context_assembler`,
-`get_checkpointer`, and (for tool tests) `get_tool_set`; without these overrides the route opens
+`get_checkpointer`, (for tool tests) `get_tool_set`, and (Stage 8) `get_rate_limiter` and
+`get_safety_classifier`; without these overrides the route opens
 a real Qdrant client. Memory tests override `get_conversation_memory`.
 `httpx.ASGITransport` does not run the lifespan, so requests are stateless unless
 `get_checkpointer` is overridden. `tests/fakes.py:ScriptedChatProvider` replies per workflow role

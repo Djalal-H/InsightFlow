@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any, Protocol
 
+import litellm
 from litellm import acompletion, get_llm_provider
 from litellm.exceptions import (
     APIConnectionError,
@@ -29,6 +30,9 @@ from insightflow.core.exceptions import (
 )
 from insightflow.core.observability import report_usage
 
+# Never let LiteLLM callbacks or its logging keep prompts and completions (see README "Security").
+litellm.turn_off_message_logging = True
+
 ChatMessage = dict[str, Any]
 
 
@@ -43,7 +47,18 @@ class ChatProvider(Protocol):
 class LiteLLMChatProvider:
     """Call any LiteLLM-supported hosted chat provider."""
 
-    def __init__(self, model: str, api_key: str | None = None, api_base: str | None = None) -> None:
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        *,
+        max_retries: int = 0,
+    ) -> None:
+        """`max_retries`: LiteLLM retries of a transient failure (rate limit, 5xx, connection).
+
+        A stream is retried only while it opens, never after its first token.
+        """
         normalized_model = model.strip()
         if not normalized_model:
             raise ProviderConfigurationError
@@ -63,15 +78,11 @@ class LiteLLMChatProvider:
         self._model = normalized_model
         self._api_key = api_key
         self._api_base = api_base
+        self._max_retries = max(0, max_retries)
 
-    def _request_options(self) -> dict[str, str]:
+    def _request_options(self) -> dict[str, Any]:
         """Return only configured connection options for LiteLLM."""
-        options: dict[str, str] = {}
-        if self._api_key:
-            options["api_key"] = self._api_key
-        if self._api_base:
-            options["api_base"] = self._api_base
-        return options
+        return request_options(self._api_key, self._api_base, self._max_retries)
 
     async def complete(self, messages: Sequence[ChatMessage]) -> str:
         with translate_provider_errors():
@@ -103,6 +114,18 @@ class LiteLLMChatProvider:
                 content = _delta_content(chunk)
                 if content:
                     yield content
+
+
+def request_options(api_key: str | None, api_base: str | None, max_retries: int) -> dict[str, Any]:
+    """The LiteLLM keyword arguments for configured connection and retry options only."""
+    options: dict[str, Any] = {}
+    if api_key:
+        options["api_key"] = api_key
+    if api_base:
+        options["api_base"] = api_base
+    if max_retries > 0:
+        options["num_retries"] = max_retries
+    return options
 
 
 @contextmanager

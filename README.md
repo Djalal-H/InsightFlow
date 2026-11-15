@@ -20,13 +20,16 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install runtime dependencies when you are ready to begin development:
+Install the dependencies. `requirements.txt` is the API runtime, `requirements-ingest.txt` adds
+the document parsers (docling with a CPU model stack), and `requirements-dev.txt` adds the test,
+lint, and type tools to both:
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 ```
 
-For development tools, use `requirements-dev.txt` instead. Copy `.env.example` to `.env` and
+The Docker images and CI install the exact versions in `requirements.lock` and
+`requirements-ingest.lock` (see "Dependencies" below). Copy `.env.example` to `.env` and
 set `LITELLM_API_KEY`, `LITELLM_API_BASE`, and the exact hosted model identifier. For Doubleword,
 use `https://api.doubleword.ai/v1` as the base and prefix the model name with `openai/`, as
 required by LiteLLM's OpenAI-compatible routing.
@@ -84,12 +87,11 @@ output shape or a routing change is intended.
 - `rag`: ingestion and retrieval domain boundaries
 - `evaluation`: labeled retrieval and answer evaluation
 - `observability`: the optional Langfuse trace sink
-- `storage`: Qdrant access
+- `storage`: Qdrant access, the Redis client, and backups (`storage/backup.py`)
 - `tools`: tool contracts, the MCP client adapter, and InsightFlow's own MCP servers
+- `security`: JWT authentication, scopes, rate limits and quotas, and the audit log
+- `guardrails`: prompt-injection controls (input screen, spotlighting, answer checks)
 - `core`: configuration, logging, run records (`core/observability.py`), and shared errors
-
-Authentication and full application containerization are intentionally deferred until their
-milestones begin.
 
 ## Observability (Stage 7)
 
@@ -108,7 +110,8 @@ At `INFO`, a request writes an access line (`request`: method, path, status, dur
 `query completed` line (model calls and tokens per kind, store and tool calls, attempts,
 verification, errors by code). Failures write `request failed` with the stable error code only.
 Questions, prompts, answers, and bodies are not logged, and configured secrets and bearer
-tokens are masked in every line. Uvicorn's own access log keeps its format.
+tokens are masked in every line. Uvicorn's own access log keeps its format (the Docker image
+turns it off, because the `request` line has the same data).
 
 `metadata.usage` in the `/query` response (and the stream's `final` event) has the same
 counters: model calls, errors, and tokens per kind (`null` when the provider did not report
@@ -129,6 +132,130 @@ failure is logged and never fails a request. This repository does not run a Lang
 ```bash
 LANGFUSE_TEST_HOST=https://cloud.langfuse.com LANGFUSE_TEST_PUBLIC_KEY=pk-lf-... \
   LANGFUSE_TEST_SECRET_KEY=sk-lf-... pytest -m langfuse   # sends one synthetic trace
+```
+
+## Security (Stage 8)
+
+All protections are settings (see `.env.example`). `APP_ENV=production` refuses to start
+without authentication, an issuer and audience, rate limits, and JSON logs, and turns the API
+docs (`/docs`, `/redoc`, `/openapi.json`) off unless `API_DOCS_ENABLED=true`.
+
+### Authentication and scopes
+
+With `AUTH_ENABLED=true`, every route except `/health/*` needs `Authorization: Bearer <JWT>`.
+Use an identity provider's JWKS (`AUTH_JWKS_URL`, RS/ES/PS algorithms) in deployments, or a
+shared secret (`AUTH_JWT_SECRET`, HS256) for local work. Only the algorithms in
+`AUTH_JWT_ALGORITHMS` are accepted (`none` never); `exp` and `sub` are required, and `iss` and
+`aud` when they are configured. Scopes come from the `scope`, `scp`, or `permissions` claim:
+
+| Scope | Allows |
+| --- | --- |
+| `query` | `POST /query`, `POST /query/stream`, and rejecting a paused tool call |
+| `threads:read` / `threads:delete` | `GET` / `DELETE /threads/{id}` of the caller's threads |
+| `tools:consequential` | Seeing tools that change data or send something, and approving their calls |
+| `admin` | Every scope, and threads of any owner (also threads from before Stage 8, which have no owner) |
+
+A thread belongs to the user who created it (a SHA-256 of the token subject is stored); another
+user gets 404, as for a thread that does not exist. With `AUTH_ENABLED=false`, one local user has
+every scope. Logs carry `user`, a short hash of the subject, never the subject.
+
+```bash
+AUTH_ENABLED=true AUTH_JWT_ALGORITHMS=HS256 AUTH_JWT_SECRET=$(openssl rand -hex 32) ...
+PYTHONPATH=src python scripts/issue_dev_token.py --sub dev --scope "query threads:read"
+```
+
+### Rate limits and quotas
+
+With `RATE_LIMIT_ENABLED=true` and `REDIS_URL`, each user may send
+`RATE_LIMIT_REQUESTS_PER_MINUTE` requests per minute on average, with bursts of
+`RATE_LIMIT_BURST` (GCRA in one Redis Lua script, on Redis' clock, so several API instances
+share the limits). `QUOTA_DAILY_REQUESTS` and `QUOTA_DAILY_TOKENS` limit each user per UTC day;
+tokens are counted from the providers' reported usage after each request. Refusals are 429
+`rate_limited` or `quota_exceeded` with `Retry-After`; admitted requests get `RateLimit-Limit`,
+`RateLimit-Remaining`, and `RateLimit-Reset`. If Redis cannot be reached, requests get 503
+`rate_limiter_unavailable`, or pass with `RATE_LIMIT_FAIL_OPEN=true`.
+
+```bash
+REDIS_TEST_URL=redis://localhost:6379/0 pytest -m redis   # the Lua script on a real Redis
+```
+
+### Prompt-injection guardrails
+
+No single control stops prompt injection (OWASP LLM01), so the workflow has several layers.
+They follow the OWASP LLM Prompt Injection Prevention Cheat Sheet, Microsoft's spotlighting
+(Hines et al., 2024), and the agent design patterns of Beurer-Kellner et al. (2025):
+
+1. **Least privilege and human approval.** A tool is consequential unless its registration lists
+   it as read-only (the calculator and `tavily_search` are read-only); MCP hints are not
+   trusted. Only callers with `tools:consequential` see such tools. A call pauses the run
+   (LangGraph `interrupt`); the response has `status: "approval_required"` and the exact tool,
+   server, and arguments. `POST /threads/{id}/approvals/{approval_id}` with
+   `{"decision": "approve" | "reject"}` continues the run. Without conversation storage, or
+   without the scope, the call is refused; `act` checks the approval again.
+2. **Spotlighting.** Passages, web pages, and tool output go into `<untrusted-NONCE>` blocks with
+   a random nonce per prompt, and the system prompts say that such text is data. With
+   `GUARD_DATAMARK_WEB=true`, web text is also datamarked.
+3. **Input screening.** Invisible and tag characters are removed from the question and from
+   untrusted text. A heuristic screen (NFKC copy, typo-tolerant keywords, role markers, decoded
+   Base64) reports `query:*`, `web:*`, `document:*`, and `tool:*` signals in
+   `metadata.guardrails` and the audit log. Web pages with a signal are removed before any prompt
+   (`GUARD_WEB_ACTION=drop`); a question with a signal is answered (`flag`) or refused with 400
+   `input_rejected` (`GUARD_INPUT_ACTION=block`). The screen is a signal, not a boundary.
+4. **Answer checks.** Each answer prompt has a random canary; an answer that contains it is
+   replaced. Markdown images and links to URLs that are not sources of the turn are removed (a
+   rendered image can send data out), secret shapes are redacted, and the length is limited. In a
+   stream, `answer_replaced` tells the client to drop the tokens of that attempt; the `final`
+   answer is authoritative.
+5. **Optional safety model.** `GUARD_SAFETY_MODEL` (for example
+   `nvidia_nim/meta/llama-guard-4-12b`) classifies the question and the answer. It finds harmful
+   content, not injection, and it fails open. Two extra model calls per request.
+6. **Limits.** Questions longer than 4,000 characters get 422, bodies over `MAX_REQUEST_BYTES`
+   get 413, and the rate limiter bounds repeated attempts.
+
+`evaluation/injection_cases.jsonl` (34 cases: attacks and benign controls) runs in the default
+suite (`tests/unit/test_injection_regression.py`). A false positive on a benign case fails it too.
+
+### Other hardening
+
+Credentials are `SecretStr` and can come from files (`SECRETS_DIR`). LiteLLM's message logging
+is off, and the loggers that can print bodies at DEBUG stay at WARNING. Responses have
+`X-Content-Type-Options: nosniff`; `/query` and `/threads` responses have
+`Cache-Control: no-store`. LiteLLM retries transient provider failures
+(`PROVIDER_MAX_RETRIES`).
+
+## Docker, CI, and operations
+
+```bash
+docker build --target api -t insightflow-api .        # the API (no docling, no torch)
+docker build --target ingest -t insightflow-ingest .  # the ingestion CLI
+docker compose --profile app up -d --build            # Qdrant, Redis, and the API
+```
+
+`.github/workflows/ci.yml` runs on pull requests and on `main`: Ruff, strict mypy, and the
+default suite on Python 3.12 and 3.13; the `redis` and `qdrant` tests against service
+containers; both image builds with a smoke test of the API image; and `pip-audit` on the API
+lock. Dependabot proposes updates weekly.
+
+Backups, restores, re-indexing with a collection alias, thread retention, and load tests are in
+[`docs/operations.md`](docs/operations.md):
+
+```bash
+PYTHONPATH=src python -m insightflow.ops backup --out backups/<stamp>
+PYTHONPATH=src python -m insightflow.ops restore --from backups/<stamp> [--checkpoints]
+PYTHONPATH=src python -m insightflow.ops prune-threads --dry-run
+PYTHONPATH=src python scripts/load_test.py --in-process --clients 20 --requests 400
+```
+
+### Dependencies
+
+Direct dependencies are pinned in the `requirements*.txt` files. After a change, regenerate the
+locks (uv 0.7 or later):
+
+```bash
+uv pip compile --universal --python-version 3.12 requirements.txt -o requirements.lock
+uv pip compile --universal --python-version 3.12 --torch-backend cpu --emit-index-url \
+  requirements-ingest.txt -o requirements-ingest.lock
+uv pip install --torch-backend cpu -r requirements-dev.txt -c requirements-ingest.lock
 ```
 
 ## Max-Min semantic chunking
@@ -286,7 +413,10 @@ only while the process runs; `none` makes every request stateless (`thread_id` i
 - Send `thread_id` from an earlier response to continue a conversation; omit it to start a new
   thread. Identifiers have 1–128 characters from `A–Z a–z 0–9 _ -`.
 - `GET /threads/{thread_id}` returns the completed turns; `DELETE /threads/{thread_id}` removes
-  the thread. Unknown threads return HTTP 404 with code `thread_not_found`.
+  the thread. Unknown threads, and threads of other users, return HTTP 404 with code
+  `thread_not_found`.
+- `python -m insightflow.ops prune-threads` deletes threads older than `THREAD_RETENTION_DAYS`
+  (see `docs/operations.md`).
 - Concurrent requests on the same thread are not serialized. Send one request per thread at a
   time.
 
@@ -306,10 +436,12 @@ Events:
 
 | Event | Data |
 | --- | --- |
-| `node` | `{"node": "agent", "action": "search_documents"}` after each step; `act` adds `tool` and `status`, `verify` adds `status`, `retry` adds `attempt`, `recall` adds `recalled_turns` |
+| `node` | `{"node": "agent", "action": "search_documents"}` after each step; `act` adds `tool` and `status`, `verify` adds `status`, `retry` adds `attempt`, `recall` adds `recalled_turns`, `approve` adds `status` |
 | `token` | `{"attempt": 1, "text": "…"}`: a piece of the answer |
 | `attempt` | `{"attempt": 2}`: a retry started; discard the tokens of earlier attempts |
-| `final` | the complete `QueryResponse` |
+| `answer_replaced` | `{"attempt": 1}`: a guardrail changed the answer; discard the tokens of this attempt |
+| `approval_required` | the `pending_approval` of the response: a consequential tool call waits for a decision |
+| `final` | the complete `QueryResponse` (its `answer` is authoritative) |
 | `error` | `{"error": {"code": …, "message": …}}`: the same sanitized errors as `POST /query` |
 
 ```bash
@@ -317,8 +449,9 @@ curl -N localhost:8000/query/stream -H 'content-type: application/json' \
   -d '{"query": "What is InsightFlow?"}'
 ```
 
-Request validation and configuration errors that occur before the stream starts return normal
-HTTP errors. After the stream starts, the status is 200 and a failure is sent as one `error` event.
+Request validation, authentication, rate-limit, and configuration errors that occur before the
+stream starts return normal HTTP errors. After the stream starts, the status is 200 and a
+failure (also a thread of another user, or a refused question) is sent as one `error` event.
 
 ## Retrieval quality (Stage 6)
 
@@ -479,7 +612,8 @@ applies to all of them. `tool_failed` and `invalid_arguments` do not pause a ser
 
 For Tavily, `max_results` is fixed to `WEB_SEARCH_MAX_RESULTS`, raw page content and images are
 turned off, and the API key is sent as an `Authorization: Bearer` header, not in the URL. Web
-content goes to the model without prompt-injection filtering; that control is Stage 8 work.
+pages are screened before they enter a prompt: a page with an injection signal is dropped by
+default (`GUARD_WEB_ACTION`), and the others go in spotlight blocks (see Security).
 
 **Calculator.** `insightflow.tools.calculator_server` parses arithmetic with `ast` and evaluates
 only allow-listed operators, functions (`abs`, `round`, `min`, `max`, `sqrt`, `floor`, `ceil`,

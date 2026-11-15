@@ -1,10 +1,19 @@
 """Provider-neutral domain models for ingestion and retrieval."""
 
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+
+MIME_TYPES_BY_SUFFIX: Mapping[str, str] = {
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pdf": "application/pdf",
+}
+"""Supported source suffixes and their MIME types (ingestion discovery and search filters)."""
 
 NonEmptyString = Annotated[str, Field(min_length=1)]
 ElementType = Literal[
