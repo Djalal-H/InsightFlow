@@ -112,6 +112,46 @@ class StepReport(BaseModel):
     duration_ms: float = Field(..., ge=0)
 
 
+class ProviderUsage(BaseModel):
+    """Calls to one kind of hosted model during the request."""
+
+    calls: int = Field(default=0, ge=0)
+    errors: int = Field(default=0, ge=0)
+    prompt_tokens: int | None = Field(
+        default=None, description="Sum over the calls that reported usage; null when none did."
+    )
+    completion_tokens: int | None = None
+    unreported_usage: int = Field(
+        default=0, ge=0, description="Calls for which the provider reported no token use."
+    )
+
+
+class UsageReport(BaseModel):
+    """Cost and reliability counters of the request."""
+
+    chat: ProviderUsage = Field(default_factory=lambda: ProviderUsage())
+    embedding: ProviderUsage = Field(default_factory=lambda: ProviderUsage())
+    rerank: ProviderUsage = Field(default_factory=lambda: ProviderUsage())
+    store_calls: int = Field(default=0, ge=0, description="Vector-store operations.")
+    retrieval_calls: int = Field(default=0, ge=0, description="search_documents steps.")
+    retrieved_passages: int = Field(
+        default=0, ge=0, description="Passages returned by those steps."
+    )
+    tool_calls: int = Field(
+        default=0, ge=0, description="Steps that called a tool other than search."
+    )
+    tool_errors: int = Field(
+        default=0, ge=0, description="Steps of any tool that ended in an error."
+    )
+    retries: int = Field(default=0, ge=0, description="Answer attempts after the first.")
+    errors: dict[str, int] = Field(
+        default_factory=dict, description="Recorded failures by stable error code."
+    )
+    node_timings_ms: dict[str, float] = Field(
+        default_factory=dict, description="Total time per workflow node."
+    )
+
+
 class ExecutionMetadata(BaseModel):
     """What the workflow did to produce the answer."""
 
@@ -125,6 +165,7 @@ class ExecutionMetadata(BaseModel):
         0, ge=0, description="Older turns that conversation memory added to the prompts."
     )
     duration_ms: int = Field(..., ge=0)
+    usage: UsageReport = Field(default_factory=lambda: UsageReport())
 
 
 class QueryResponse(BaseModel):

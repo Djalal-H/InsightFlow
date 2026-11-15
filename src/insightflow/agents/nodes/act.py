@@ -4,6 +4,7 @@ from insightflow.agents.document_search import DocumentSearch
 from insightflow.agents.graph import AgentNode
 from insightflow.agents.models import SEARCH_TOOL, Observation
 from insightflow.agents.state import AgentState
+from insightflow.core.observability import record_tool_call
 from insightflow.tools.registry import ToolSet
 
 
@@ -20,6 +21,14 @@ def make_act_node(search: DocumentSearch, tools: ToolSet) -> AgentNode:
             )
         else:
             result, passages = await tools.call_tool(action.action, action.arguments), []
+        record_tool_call(
+            tool=result.tool,
+            server=result.server,
+            started_at=result.started_at,
+            duration_ms=result.duration_ms,
+            status=result.status,
+            error=result.error,
+        )
         observation = Observation(
             attempt=state.get("attempt", 1),
             thought=action.thought,

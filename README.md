@@ -70,19 +70,66 @@ docker compose up -d qdrant
 QDRANT_TEST_URL=http://localhost:6333 pytest -m qdrant
 ```
 
+The default suite also runs two regression sets with no credentials:
+`evaluation/structured_cases.jsonl` (raw model outputs per workflow role and the expected parse
+or fallback) and `evaluation/workflow_cases.jsonl` (scripted agent runs with the expected node
+order, steps, verification, and usage counters). Add a case when a hosted model shows a new
+output shape or a routing change is intended.
+
 ## Architecture
 
 - `api`: HTTP routes and transport schemas
 - `agents`: LangGraph state, nodes, and graph construction
 - `providers`: provider-independent chat, embedding, and rerank contracts with LiteLLM adapters
 - `rag`: ingestion and retrieval domain boundaries
-- `evaluation`: labeled retrieval evaluation
+- `evaluation`: labeled retrieval and answer evaluation
+- `observability`: the optional Langfuse trace sink
 - `storage`: Qdrant access
 - `tools`: tool contracts, the MCP client adapter, and InsightFlow's own MCP servers
-- `core`: configuration, logging, and shared errors
+- `core`: configuration, logging, run records (`core/observability.py`), and shared errors
 
-Authentication, observability services, and full application containerization are intentionally
-deferred until their milestones begin.
+Authentication and full application containerization are intentionally deferred until their
+milestones begin.
+
+## Observability (Stage 7)
+
+Every HTTP request gets a request ID: a valid `X-Request-ID` header (letters, digits, `_.:-`,
+at most 128 characters) is kept, any other value is replaced, and the response returns it in
+`X-Request-ID`. The ID is on every log line of the request, with the thread and the workflow
+node.
+
+```bash
+LOG_FORMAT=json uvicorn insightflow.main:app --app-dir src   # one JSON object per line
+LOG_LEVEL=DEBUG LOG_FORMAT=json uvicorn ...                  # also one line per node, model
+                                                             # call, Qdrant call, and tool call
+```
+
+At `INFO`, a request writes an access line (`request`: method, path, status, duration) and a
+`query completed` line (model calls and tokens per kind, store and tool calls, attempts,
+verification, errors by code). Failures write `request failed` with the stable error code only.
+Questions, prompts, answers, and bodies are not logged, and configured secrets and bearer
+tokens are masked in every line. Uvicorn's own access log keeps its format.
+
+`metadata.usage` in the `/query` response (and the stream's `final` event) has the same
+counters: model calls, errors, and tokens per kind (`null` when the provider did not report
+them; `unreported_usage` counts such calls), retrieval calls and passages, tool calls and
+errors, retries, errors by code, and the time per node.
+
+### Langfuse traces (opt-in)
+
+With `LANGFUSE_ENABLED=true` and keys from a Langfuse project (Langfuse Cloud or your own server
+in `LANGFUSE_HOST`), each request is sent as one trace after it ends: a span per workflow node
+and, inside it, one observation per model call (model and token use), Qdrant call, and tool
+call. The thread is the Langfuse session. Only metadata is sent unless
+`LANGFUSE_CAPTURE_CONTENT=true`, which also sends the question, the answer, and each model
+call's messages and output. `LANGFUSE_SAMPLE_RATE` keeps a share of the requests. A Langfuse
+failure is logged and never fails a request. This repository does not run a Langfuse server
+(self-hosting needs Postgres, ClickHouse, Redis, and object storage).
+
+```bash
+LANGFUSE_TEST_HOST=https://cloud.langfuse.com LANGFUSE_TEST_PUBLIC_KEY=pk-lf-... \
+  LANGFUSE_TEST_SECRET_KEY=sk-lf-... pytest -m langfuse   # sends one synthetic trace
+```
 
 ## Max-Min semantic chunking
 
@@ -348,7 +395,36 @@ budget): `hit` (a labeled passage is present), `recall` (the share of labeled pa
 `mrr`, the number of passages, the context tokens, and the retrieval time. A variant is plain
 dense retrieval plus the named options (`hybrid`, `multi_query`, `decompose`, `rerank`,
 `corrective`, `neighbors`, `compress`); `configured` is the `.env` setup. The command reads the
-collection and writes nothing to it. It does not measure answer quality.
+collection and writes nothing to it. It does not measure answer quality. Each variant also
+reports its model calls and tokens. `--baseline scores.json` compares a run with an earlier
+`--output` file and exits with code 3 when hit, recall, or mrr fell more than `--tolerance`
+(default 0.02).
+
+#### Answer quality
+
+`evaluation/answer_cases.jsonl` holds 28 questions: 25 with the facts that a correct answer
+states (with accepted phrasings, checked against the corpus text) and 3 that the corpus cannot
+answer. `insightflow.evaluate_answers` runs the full workflow for each case (as `POST /query`,
+no thread, no tools unless `--with-tools`) and one judge call, and reports fact recall (by
+phrasing and by the judge), unsupported claims, correct refusals, citation validity, source
+coverage, verification, retries, model calls, tokens, and latency.
+
+```bash
+PYTHONPATH=src python -m insightflow.evaluate_answers --dry-run          # estimate, no request
+PYTHONPATH=src python -m insightflow.evaluate_answers --max-chat-calls 150 --output answers.json
+PYTHONPATH=src python -m insightflow.evaluate_answers --variants configured,dense+rerank --max-cases 10
+```
+
+The run is billable. It stops when `--max-chat-calls` (default 200) or `--max-tokens` (default
+400,000) is used up, and prints the partial report. An unreadable judge verdict leaves a case
+unjudged; it does not count as a pass. With `LANGFUSE_ENABLED`, each case is one trace.
+
+Measured on 2026-11-15 with the `.env` setup (dense retrieval, NVIDIA NIM chat and embedding
+models; details in `docs/progress/PROGRESS.md`): fact recall 0.960 (judge 0.940), citations
+valid 1.000, source coverage 0.960, verification passed 0.893, 167 chat calls for 28 cases. None
+of the 3 unanswerable questions was refused. On the retrieval set, `dense+corrective` was the
+only option with a gain (hit 1.000, mrr 0.979, 268 context tokens instead of 1147);
+`dense+compress` lost passages; `multi_query` and `decompose` gave no gain.
 
 Measured on 2026-11-13 with `nvidia_nim/nvidia/nemotron-3-embed-1b` (details in
 `docs/progress/PROGRESS.md`):

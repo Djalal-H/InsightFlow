@@ -23,12 +23,20 @@ from insightflow.api.dependencies import (
 )
 from insightflow.core.config import Settings, get_settings
 from insightflow.core.exceptions import InsightFlowError
+from insightflow.core.observability import PROVIDER_KINDS, RunRecorder, recording
 from insightflow.evaluation.retrieval import (
     EvaluationCase,
     VariantReport,
+    compare_to_baseline,
     evaluate_retriever,
     format_reports,
     load_cases,
+    load_reports,
+)
+from insightflow.providers.instrumented import (
+    instrument_chat,
+    instrument_embedding,
+    instrument_rerank,
 )
 from insightflow.rag.composition import build_retriever
 from insightflow.rag.config import RetrievalConfig
@@ -107,25 +115,50 @@ async def run(
                 continue
             retriever = build_retriever(
                 config,
-                embedding_provider=embedding_provider,
+                embedding_provider=instrument_embedding(
+                    embedding_provider, model=settings.litellm_embedding_model
+                ),
                 searcher=store,
                 reader=store,
-                chat_provider=get_chat_provider(settings),
-                rerank_provider=rerank_provider,
+                chat_provider=instrument_chat(
+                    get_chat_provider(settings), model=settings.litellm_chat_model
+                ),
+                rerank_provider=(
+                    instrument_rerank(rerank_provider, model=settings.litellm_rerank_model)
+                    if rerank_provider is not None
+                    else None
+                ),
             )
-            try:
-                report = await evaluate_retriever(
-                    name,
-                    retriever,
-                    assembler,
-                    cases,
-                    top_k=config.candidate_top_k,
-                    budget=budget,
-                )
-            except InsightFlowError as exc:
-                report = VariantReport(name=name, error=f"{type(exc).__name__}: {exc}")
+            with recording(RunRecorder(f"evaluate-{name}")) as recorder:
+                try:
+                    report = await evaluate_retriever(
+                        name,
+                        retriever,
+                        assembler,
+                        cases,
+                        top_k=config.candidate_top_k,
+                        budget=budget,
+                    )
+                except InsightFlowError as exc:
+                    report = VariantReport(name=name, error=f"{type(exc).__name__}: {exc}")
+            calls = {
+                kind: recorder.totals(kind).calls
+                for kind in PROVIDER_KINDS
+                if recorder.totals(kind).calls
+            }
+            report = report.model_copy(
+                update={
+                    "provider_calls": calls,
+                    "tokens": recorder.total_tokens(),
+                    "errors": dict(recorder.errors),
+                }
+            )
             reports.append(report)
-            print(f"finished {name}", file=sys.stderr)
+            print(
+                f"finished {name}: calls {calls}, tokens {report.tokens}, "
+                f"absorbed failures {report.errors or 'none'}",
+                file=sys.stderr,
+            )
     finally:
         await store.close()
     return reports
@@ -146,6 +179,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--tag", help="evaluate only the cases with this tag")
     parser.add_argument("--output", type=Path, help="also write the per-case scores as JSON")
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        help="a JSON file from an earlier --output; exit 3 when a score fell below it",
+    )
+    parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.02,
+        help="allowed drop of hit, recall, and mrr against --baseline (default 0.02)",
+    )
     args = parser.parse_args(argv)
 
     if not args.dataset.is_file():
@@ -155,6 +199,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         cases = [case for case in cases if args.tag in case.tags]
     if not cases:
         parser.error("no evaluation cases selected")
+    baseline: list[VariantReport] | None = None
+    if args.baseline is not None:
+        if not args.baseline.is_file():
+            parser.error(f"baseline does not exist: {args.baseline}")
+        baseline = load_reports(args.baseline)
+    if args.tolerance < 0:
+        parser.error("--tolerance must not be negative")
     variants = [name.strip() for name in args.variants.split(",") if name.strip()]
     settings = get_settings()
     try:
@@ -176,6 +227,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output.write_text(
             json.dumps([report.model_dump() for report in reports], indent=2), encoding="utf-8"
         )
+    if baseline is not None:
+        problems = compare_to_baseline(reports, baseline, tolerance=args.tolerance)
+        if problems:
+            print("Regression against the baseline:", file=sys.stderr)
+            for problem in problems:
+                print(f"  {problem}", file=sys.stderr)
+            return 3
+        print(f"No regression against {args.baseline} (tolerance {args.tolerance}).")
     return 0
 
 

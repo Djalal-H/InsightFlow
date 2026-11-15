@@ -8,6 +8,7 @@ from qdrant_client import AsyncQdrantClient, models
 from insightflow.agents.memory import RememberedTurn
 from insightflow.core.config import Settings
 from insightflow.core.exceptions import StorageError
+from insightflow.core.observability import store_call
 from insightflow.rag.identity import INSIGHTFLOW_RAG_NAMESPACE
 
 VECTOR_NAME = "dense"
@@ -29,6 +30,19 @@ class QdrantMemoryStore:
         )
 
     async def save_turn(
+        self,
+        thread_id: str,
+        turn_index: int,
+        vector: Sequence[float],
+        *,
+        query: str,
+        answer: str,
+    ) -> None:
+        async with store_call("memory_save") as recorded:
+            await self._save_turn(thread_id, turn_index, vector, query=query, answer=answer)
+            recorded.results = 1
+
+    async def _save_turn(
         self,
         thread_id: str,
         turn_index: int,
@@ -79,6 +93,26 @@ class QdrantMemoryStore:
         limit: int,
         before_turn: int,
         score_threshold: float | None = None,
+    ) -> list[RememberedTurn]:
+        async with store_call("memory_search") as recorded:
+            turns = await self._search_turns(
+                thread_id,
+                vector,
+                limit=limit,
+                before_turn=before_turn,
+                score_threshold=score_threshold,
+            )
+            recorded.results = len(turns)
+        return turns
+
+    async def _search_turns(
+        self,
+        thread_id: str,
+        vector: Sequence[float],
+        *,
+        limit: int,
+        before_turn: int,
+        score_threshold: float | None,
     ) -> list[RememberedTurn]:
         try:
             if not await self._client.collection_exists(self.collection_name):

@@ -6,12 +6,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from insightflow.agents.checkpoint import open_checkpointer
-from insightflow.api.dependencies import create_tool_set
+from insightflow.api.dependencies import create_tool_set, create_trace_sink
 from insightflow.api.errors import (
     application_error_handler,
     provider_error_handler,
     storage_error_handler,
 )
+from insightflow.api.middleware import RequestContextMiddleware
 from insightflow.api.routes.health import router as health_router
 from insightflow.api.routes.query import router as query_router
 from insightflow.api.routes.threads import router as threads_router
@@ -22,16 +23,23 @@ from insightflow.core.logging import configure_logging
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """Configure logging, build the tool set, and open the workflow checkpointer once."""
+    """Configure logging, build the tool set and trace sink, and open the checkpointer once."""
     settings = get_settings()
     # Before the tool set: an in-process MCPServer configures root logging when none exists.
-    configure_logging(settings.log_level)
+    configure_logging(
+        settings.log_level, log_format=settings.log_format, secrets=settings.secret_values()
+    )
     application.state.tool_set = create_tool_set(settings)
-    async with open_checkpointer(
-        settings.checkpoint_backend, settings.checkpoint_sqlite_path
-    ) as checkpointer:
-        application.state.checkpointer = checkpointer
-        yield
+    sink = create_trace_sink(settings)
+    application.state.trace_sink = sink
+    try:
+        async with open_checkpointer(
+            settings.checkpoint_backend, settings.checkpoint_sqlite_path
+        ) as checkpointer:
+            application.state.checkpointer = checkpointer
+            yield
+    finally:
+        sink.flush()
 
 
 def create_app() -> FastAPI:
@@ -42,6 +50,7 @@ def create_app() -> FastAPI:
         description="API-first agent orchestration and retrieval platform.",
         lifespan=lifespan,
     )
+    application.add_middleware(RequestContextMiddleware)
     application.add_exception_handler(ProviderError, provider_error_handler)
     application.add_exception_handler(StorageError, storage_error_handler)
     application.add_exception_handler(InsightFlowError, application_error_handler)

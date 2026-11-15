@@ -167,9 +167,22 @@ async def test_query_answers_from_retrieved_context_with_sources() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["metadata"].pop("duration_ms") >= 0
+    usage = body["metadata"].pop("usage")
     [step] = body["metadata"]["steps"]
     assert step.pop("duration_ms") >= 0
     assert len(step.pop("call_id")) == 32
+    # agent (unreadable), agent, answer. A test double reports no token use; calls still count.
+    assert usage["chat"] == {
+        "calls": 3,
+        "errors": 0,
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "unreported_usage": 3,
+    }
+    assert (usage["retrieval_calls"], usage["retrieved_passages"]) == (1, 1)
+    assert (usage["tool_calls"], usage["tool_errors"], usage["retries"]) == (0, 0, 0)
+    assert usage["errors"] == {}
+    assert set(usage["node_timings_ms"]) == {"agent", "act", "answer", "verify", "finalize"}
     assert body == {
         "answer": "InsightFlow is a RAG platform [1].",
         "thread_id": None,

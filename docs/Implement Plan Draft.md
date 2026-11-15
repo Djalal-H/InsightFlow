@@ -160,6 +160,22 @@ answer-quality evaluation (Stage 7).
 
 These systems should not all be adopted automatically.
 
+Implementation (2026-11-14): standard-library structured logs and Langfuse were chosen by the
+author; OpenTelemetry is used only inside the Langfuse adapter, and Prometheus/Grafana are not
+adopted.
+
+| Core work | Implementation |
+| --- | --- |
+| Correlated logs | `X-Request-ID` middleware, a per-request `RunRecorder` in a context variable, `request_id`/`thread_id`/`node` on every line, `LOG_FORMAT=json` |
+| Latency, tokens, retrievals, retries, error categories | Provider wrappers, node, store, and tool records; `metadata.usage` in the response and a `query completed` log line; stable error codes; secret redaction in the formatter |
+| LLM traces | Opt-in Langfuse sink (one trace per request, metadata only unless `LANGFUSE_CAPTURE_CONTENT`) |
+| Deterministic regression datasets | `evaluation/structured_cases.jsonl` (34 model-output shapes), `evaluation/workflow_cases.jsonl` (14 scripted runs), `evaluate --baseline` for retrieval scores |
+| Opt-in, budgeted API evaluation | `python -m insightflow.evaluate_answers` on `evaluation/answer_cases.jsonl` (28 cases) with call and token limits and `--dry-run` |
+
+Not done in this stage: a metrics endpoint, Prometheus/Grafana, OpenTelemetry export to other
+backends, Langfuse prompt management, token counts for streamed answers when the provider sends
+no usage chunk (`stream_options` is not set), and JSON format for Uvicorn's own access log.
+
 ## Stage 8: Security and production readiness
 
 **Goal:** Prepare a proven workflow for controlled deployment.

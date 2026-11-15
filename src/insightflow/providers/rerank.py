@@ -8,7 +8,7 @@ from typing import Any, Protocol
 from litellm import arerank
 
 from insightflow.core.exceptions import ProviderConfigurationError, ProviderError
-from insightflow.providers.llm import translate_provider_errors
+from insightflow.providers.llm import report_response_usage, translate_provider_errors
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,7 @@ class LiteLLMRerankProvider:
                 return_documents=False,
                 **options,
             )
+        report_response_usage(response)
         return _parse_results(getattr(response, "results", None), len(documents))[:top_n]
 
 

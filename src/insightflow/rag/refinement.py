@@ -9,16 +9,21 @@
 knows the `Retriever` protocol.
 """
 
+import logging
 import re
 from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from insightflow.core.exceptions import ProviderConfigurationError, ProviderError
+from insightflow.core.observability import error_code, record_error
 from insightflow.providers.llm import ChatProvider
 from insightflow.providers.rerank import RerankProvider
 from insightflow.providers.structured import complete_json
 from insightflow.rag.models import Chunk, RetrievalQuery, RetrievedChunk
 from insightflow.rag.protocols import CandidateProcessor, ChunkReader, Retriever
+
+logger = logging.getLogger(__name__)
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _UNCOMPRESSED_CONTENT_TYPES = frozenset({"table", "code"})
@@ -50,7 +55,13 @@ class RefiningRetriever:
 
 
 class Reranker:
-    """Order candidates by a hosted reranker's relevance score and keep the best `top_n`."""
+    """Order candidates by a hosted reranker's relevance score and keep the best `top_n`.
+
+    When the reranker call fails (rate limit, timeout, a provider refusal such as content
+    screening), the candidates keep their retrieval order, cut to `top_n`, and the failure is
+    logged and recorded. A configuration error (wrong model or key) is raised, so that a broken
+    setup is not hidden.
+    """
 
     def __init__(self, provider: RerankProvider, *, top_n: int) -> None:
         if top_n < 1:
@@ -61,11 +72,19 @@ class Reranker:
     async def process(
         self, query: RetrievalQuery, candidates: list[RetrievedChunk]
     ) -> list[RetrievedChunk]:
-        results = await self._provider.rerank(
-            query.text,
-            [candidate.chunk.content for candidate in candidates],
-            top_n=self._top_n,
-        )
+        try:
+            results = await self._provider.rerank(
+                query.text,
+                [candidate.chunk.content for candidate in candidates],
+                top_n=self._top_n,
+            )
+        except ProviderConfigurationError:
+            raise
+        except ProviderError as exc:
+            code = error_code(exc)
+            record_error(code)
+            logger.warning("rerank failed; retrieval order kept", extra={"fields": {"code": code}})
+            return candidates[: self._top_n]
         return [
             candidates[result.index].model_copy(update={"score": result.score, "rank": rank})
             for rank, result in enumerate(results[: self._top_n], start=1)

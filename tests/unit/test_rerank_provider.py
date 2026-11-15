@@ -8,11 +8,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from litellm.exceptions import AuthenticationError, RateLimitError
+from litellm.llms.base_llm.chat.transformation import BaseLLMException
 
 from insightflow.core.exceptions import (
     ProviderConfigurationError,
     ProviderError,
     ProviderRateLimitError,
+    ProviderTimeoutError,
 )
 from insightflow.providers.rerank import LiteLLMRerankProvider, RerankResult
 
@@ -74,6 +76,11 @@ async def test_invalid_rerank_responses_are_provider_errors(reply: SimpleNamespa
     [
         (RateLimitError("limited", "cohere", "rerank-test"), ProviderRateLimitError),
         (AuthenticationError("denied", "cohere", "rerank-test"), ProviderConfigurationError),
+        # LiteLLM's rerank path raises its base exception with the HTTP status.
+        (BaseLLMException(422, "input rejected by content safety screening"), ProviderError),
+        (BaseLLMException(404, "no such model"), ProviderConfigurationError),
+        (BaseLLMException(429, "slow down"), ProviderRateLimitError),
+        (BaseLLMException(504, "gateway timeout"), ProviderTimeoutError),
     ],
 )
 async def test_rerank_maps_provider_failures(

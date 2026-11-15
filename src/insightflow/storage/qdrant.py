@@ -7,6 +7,7 @@ from qdrant_client import AsyncQdrantClient, models
 
 from insightflow.core.config import Settings
 from insightflow.core.exceptions import StorageError
+from insightflow.core.observability import store_call
 from insightflow.rag.config import DistanceMetric, EmbeddingConfig
 from insightflow.rag.models import Chunk, NormalizedDocument, RetrievedChunk, SparseVector
 
@@ -255,6 +256,32 @@ class QdrantStore:
             if values
         ]
         query_filter = models.Filter(must=conditions) if conditions else None
+        hybrid = sparse_vector is not None and bool(sparse_vector.indices)
+        operation = "hybrid_search" if hybrid else "search"
+        async with store_call(operation) as recorded:
+            points = await self._query_points(
+                vector, limit, query_filter, score_threshold, sparse_vector
+            )
+            recorded.results = len(points)
+        return [
+            RetrievedChunk(
+                chunk=payload_to_chunk(point.payload or {}),
+                source_identifier=(point.payload or {})["source_identifier"],
+                source_name=(point.payload or {})["source_name"],
+                score=point.score,
+                rank=rank,
+            )
+            for rank, point in enumerate(points, start=1)
+        ]
+
+    async def _query_points(
+        self,
+        vector: Sequence[float],
+        limit: int,
+        query_filter: models.Filter | None,
+        score_threshold: float | None,
+        sparse_vector: SparseVector | None,
+    ) -> list[models.ScoredPoint]:
         try:
             if sparse_vector is not None and sparse_vector.indices:
                 depth = max(2 * limit, _MIN_HYBRID_PREFETCH)
@@ -291,30 +318,24 @@ class QdrantStore:
                 )
         except Exception as exc:
             raise StorageError("Qdrant search failed") from exc
-        return [
-            RetrievedChunk(
-                chunk=payload_to_chunk(point.payload or {}),
-                source_identifier=(point.payload or {})["source_identifier"],
-                source_name=(point.payload or {})["source_name"],
-                score=point.score,
-                rank=rank,
-            )
-            for rank, point in enumerate(result.points, start=1)
-        ]
+        return list(result.points)
 
     async def get_chunks(self, chunk_ids: Sequence[str]) -> list[Chunk]:
         """Return the stored chunks with these identifiers; unknown ones are left out."""
         if not chunk_ids:
             return []
-        try:
-            records = await self._client.retrieve(
-                collection_name=self.collection_name,
-                ids=list(chunk_ids),
-                with_payload=True,
-            )
-        except Exception as exc:
-            raise StorageError("Qdrant chunk lookup failed") from exc
-        return [payload_to_chunk(record.payload) for record in records if record.payload]
+        async with store_call("get_chunks") as recorded:
+            try:
+                records = await self._client.retrieve(
+                    collection_name=self.collection_name,
+                    ids=list(chunk_ids),
+                    with_payload=True,
+                )
+            except Exception as exc:
+                raise StorageError("Qdrant chunk lookup failed") from exc
+            chunks = [payload_to_chunk(record.payload) for record in records if record.payload]
+            recorded.results = len(chunks)
+        return chunks
 
     async def close(self) -> None:
         """Release client network resources."""

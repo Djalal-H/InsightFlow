@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,10 +15,12 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     app_env: str = "development"
     log_level: str = "INFO"
+    log_format: Literal["text", "json"] = "text"
     litellm_api_key: str | None = None
     litellm_api_base: str | None = None
     litellm_chat_model: str = ""
@@ -85,6 +87,17 @@ class Settings(BaseSettings):
     tavily_api_key: SecretStr | None = None
     tavily_mcp_url: str = "https://mcp.tavily.com/mcp/"
     web_search_max_results: int = Field(default=5, ge=1, le=20)
+    langfuse_enabled: bool = False
+    # `LANGFUSE_BASE_URL` is the name that the Langfuse project page and SDK use.
+    langfuse_host: str = Field(
+        default="https://cloud.langfuse.com",
+        validation_alias=AliasChoices("LANGFUSE_HOST", "LANGFUSE_BASE_URL"),
+    )
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: SecretStr | None = None
+    # Prompts, model outputs, questions, and answers go to Langfuse only when this is true.
+    langfuse_capture_content: bool = False
+    langfuse_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_rag_token_limits(self) -> Self:
@@ -108,7 +121,23 @@ class Settings(BaseSettings):
             self.tavily_api_key and self.tavily_api_key.get_secret_value().strip()
         ):
             raise ValueError("TOOL_WEB_SEARCH_ENABLED requires TAVILY_API_KEY")
+        if self.langfuse_enabled and not (
+            self.langfuse_public_key
+            and self.langfuse_secret_key
+            and self.langfuse_secret_key.get_secret_value().strip()
+        ):
+            raise ValueError(
+                "LANGFUSE_ENABLED requires LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY"
+            )
         return self
+
+    def secret_values(self) -> list[str]:
+        """The configured credentials, which logs must never contain."""
+        values = [self.litellm_api_key, self.litellm_rerank_api_key, self.qdrant_api_key]
+        for secret in (self.tavily_api_key, self.langfuse_secret_key):
+            if secret is not None:
+                values.append(secret.get_secret_value())
+        return [value for value in values if value]
 
 
 @lru_cache

@@ -153,3 +153,22 @@ def test_the_repository_evaluation_set_is_valid_and_points_at_corpus_files() -> 
             assert path.is_file(), f"{item.id}: {passage.source}"
             assert path.suffix.lower() in MIME_TYPES_BY_SUFFIX
             assert passage.evidence, item.id
+
+
+def test_a_variant_that_failed_after_a_completed_baseline_is_a_regression() -> None:
+    from insightflow.evaluation.retrieval import VariantReport, compare_to_baseline
+
+    done = VariantReport(name="dense", cases=[])
+    failed = VariantReport(name="dense", error="ProviderError: down")
+    assert compare_to_baseline([failed], [done], tolerance=0.0) == [
+        "dense: not run (ProviderError: down)"
+    ]
+    assert compare_to_baseline([done], [failed], tolerance=0.0) == []
+
+
+
+def test_absorbed_failures_are_shown_in_the_table() -> None:
+    from insightflow.evaluation.retrieval import VariantReport, format_reports
+
+    text = format_reports([VariantReport(name="dense+rerank", errors={"provider_error": 48})])
+    assert "absorbed failures: provider_error x48" in text

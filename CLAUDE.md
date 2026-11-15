@@ -24,6 +24,8 @@ TAVILY_TEST_API_KEY=tvly-... pytest -m tavily            # opt-in, one billable 
 docker compose up -d qdrant   # only when a workflow needs a real vector store
 uvicorn insightflow.main:app --app-dir src --reload
 PYTHONPATH=src python -m insightflow.evaluate --variants dense,hybrid   # billable retrieval comparison
+PYTHONPATH=src python -m insightflow.evaluate_answers --dry-run          # answer eval estimate (run is billable)
+LOG_FORMAT=json uvicorn insightflow.main:app --app-dir src               # JSON log lines with request_id
 PYTHONPATH=src python scripts/manual_chat_test.py "prompt"   # real provider call (billable)
 ```
 
@@ -89,6 +91,31 @@ Every technique is off by default (`RAG_*`, `LITELLM_RERANK_MODEL`, `AGENT_MULTI
   state (`new_turn_input`), and memory is ignored without a checkpointer.
 - `evaluation/retrieval.py` and `insightflow/evaluate.py`: scores of the assembled context on
   `evaluation/retrieval_cases.jsonl` (labels are source + evidence text, not chunk ids).
+
+### Observability and evaluation (Stage 7)
+
+- `core/observability.py`: a `RunRecorder` per request (opened by `api/middleware.py`, which also
+  sets `X-Request-ID`) is found through a context variable; without one every report is a no-op.
+  Reports come from `providers/instrumented.py` (wrappers that time calls, record error codes,
+  check the `CallBudget`, and receive `report_usage` from the LiteLLM adapters),
+  `agents/graph.py:traced` (`node_run`, which also sets the node for attribution),
+  `storage/qdrant*.py` (`store_call`), and the `act` node (`record_tool_call`). The wrappers are
+  applied in `build_workflow` and `get_retriever`, so test doubles are recorded too.
+- `core/logging.py`: `LOG_FORMAT=text|json`, run context on every line, `extra={"fields": ...}`,
+  and redaction of `Settings.secret_values()` and bearer/API-key shapes. Never log questions,
+  prompts, or answers.
+- `api/workflow.py:usage_report` builds `metadata.usage`; `finish_run` logs `query completed`
+  and exports to the `TraceSink` (`get_trace_sink`, `app.state.trace_sink`). The only Langfuse
+  code is `observability/langfuse_sink.py` (post-hoc spans with real times on a private OTel
+  provider; content only with `LANGFUSE_CAPTURE_CONTENT`). The SDK keeps one exporter per public
+  key and process: tests use a new key per sink.
+- Regression sets in the default suite: `evaluation/structured_cases.jsonl`
+  (`tests/unit/test_structured_regression.py`) and `evaluation/workflow_cases.jsonl`
+  (`tests/integration/test_workflow_regression.py`). `ScriptedChatProvider` copies reply lists
+  and knows the `evaluate` role (answer judge).
+- `evaluation/answers.py` + `insightflow/evaluate_answers.py`: full-workflow answer scoring with a
+  `RunBudget` over the run; `BudgetExceededError` stops it with a partial report.
+  `insightflow/evaluate.py --baseline` exits 3 on a retrieval regression.
 
 ### Query workflow (ReAct, Stages 4–5)
 

@@ -39,6 +39,10 @@ class ThreadNotFoundError(InsightFlowError):
     """A conversation thread has no stored checkpoint."""
 
 
+class BudgetExceededError(InsightFlowError):
+    """A run reached its provider call or token budget (evaluation runs only)."""
+
+
 DocumentRejectionReason = Literal[
     "unsupported_format",
     "encrypted_pdf",

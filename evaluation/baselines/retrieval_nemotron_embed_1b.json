@@ -1,0 +1,2941 @@
+[
+  {
+    "name": "dense",
+    "cases": [
+      {
+        "case_id": "handbook-quiet-hours",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1287,
+        "latency_ms": 707.663075999335
+      },
+      {
+        "case_id": "handbook-graduate-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 667,
+        "latency_ms": 131.2527849995604
+      },
+      {
+        "case_id": "handbook-missed-classes",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 694,
+        "latency_ms": 162.3883680003928
+      },
+      {
+        "case_id": "handbook-grade-b-plus",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 652,
+        "latency_ms": 153.3620130003328
+      },
+      {
+        "case_id": "handbook-library-volumes",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1155,
+        "latency_ms": 125.4575630000545
+      },
+      {
+        "case_id": "handbook-help-desk-phone",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1362,
+        "latency_ms": 126.08528999953705
+      },
+      {
+        "case_id": "handbook-spring-registration",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 993,
+        "latency_ms": 153.12621600060083
+      },
+      {
+        "case_id": "handbook-meal-plans",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 453,
+        "latency_ms": 127.07215399950655
+      },
+      {
+        "case_id": "calendar-fall-withdrawal",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 925,
+        "latency_ms": 162.35832900019886
+      },
+      {
+        "case_id": "calendar-juneteenth",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2403,
+        "latency_ms": 159.74458399978175
+      },
+      {
+        "case_id": "calendar-registrar-office",
+        "tags": [
+          "fact"
+        ],
+        "hit": false,
+        "recall": 0.0,
+        "reciprocal_rank": 0.0,
+        "passages": 6,
+        "context_tokens": 1543,
+        "latency_ms": 128.5494909998306
+      },
+      {
+        "case_id": "cs-cs330-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 455,
+        "latency_ms": 158.71161399991252
+      },
+      {
+        "case_id": "cs-python-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 498,
+        "latency_ms": 126.613379000446
+      },
+      {
+        "case_id": "cs-mobile-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 221,
+        "latency_ms": 154.8746080006822
+      },
+      {
+        "case_id": "nursing-nurs212-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 516,
+        "latency_ms": 131.34237899976142
+      },
+      {
+        "case_id": "placement-cs-rate",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 589,
+        "latency_ms": 127.01014699996449
+      },
+      {
+        "case_id": "placement-career-fair",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 858,
+        "latency_ms": 137.01256300009845
+      },
+      {
+        "case_id": "placement-tariq-alvi",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1294,
+        "latency_ms": 124.31419600034133
+      },
+      {
+        "case_id": "international-insurance-cost",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 467,
+        "latency_ms": 125.19878200055246
+      },
+      {
+        "case_id": "international-work-hours",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 6,
+        "context_tokens": 632,
+        "latency_ms": 128.2240919999822
+      },
+      {
+        "case_id": "international-night-shuttle",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 964,
+        "latency_ms": 147.65170899954683
+      },
+      {
+        "case_id": "infrastructure-diving-pool",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1154,
+        "latency_ms": 125.27692299954651
+      },
+      {
+        "case_id": "infrastructure-climbing-wall",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1125,
+        "latency_ms": 125.40937599987956
+      },
+      {
+        "case_id": "infrastructure-dietician",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 507,
+        "latency_ms": 127.43551099993056
+      },
+      {
+        "case_id": "sports-volleyball-coach",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 855,
+        "latency_ms": 129.83669000004738
+      },
+      {
+        "case_id": "sports-tennis-achievement",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 843,
+        "latency_ms": 128.482167000584
+      },
+      {
+        "case_id": "exchange-chile-partner",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 731,
+        "latency_ms": 128.38255699989531
+      },
+      {
+        "case_id": "exchange-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 698,
+        "latency_ms": 126.11970100078906
+      },
+      {
+        "case_id": "research-cibr-director",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1150,
+        "latency_ms": 126.63596000038524
+      },
+      {
+        "case_id": "research-cii-projects",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.25,
+        "passages": 6,
+        "context_tokens": 569,
+        "latency_ms": 127.1319030001905
+      },
+      {
+        "case_id": "policy-meal-allowance",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 454,
+        "latency_ms": 146.40098800009582
+      },
+      {
+        "case_id": "policy-conference-count",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 473,
+        "latency_ms": 126.24702599987359
+      },
+      {
+        "case_id": "accreditation-valid-through",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1273,
+        "latency_ms": 131.02671999968152
+      },
+      {
+        "case_id": "awards-teaching",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1296,
+        "latency_ms": 133.78626299981988
+      },
+      {
+        "case_id": "contact-engineering-email",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 903,
+        "latency_ms": 129.7399459999724
+      },
+      {
+        "case_id": "map-night-escort",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 1489,
+        "latency_ms": 125.92689400025847
+      },
+      {
+        "case_id": "markdown-flask-origins",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2565,
+        "latency_ms": 151.03782099959062
+      },
+      {
+        "case_id": "markdown-fastapi-redoc",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 6,
+        "context_tokens": 3005,
+        "latency_ms": 139.09727100053715
+      },
+      {
+        "case_id": "markdown-required-query",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2551,
+        "latency_ms": 216.14149499964697
+      },
+      {
+        "case_id": "markdown-requests-install",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1651,
+        "latency_ms": 138.89281100000517
+      },
+      {
+        "case_id": "novel-holmes-the-woman",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 3366,
+        "latency_ms": 156.84263999992254
+      },
+      {
+        "case_id": "novel-utterson-drink",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 3369,
+        "latency_ms": 128.2194690002143
+      },
+      {
+        "case_id": "novel-martians-watching",
+        "tags": [
+          "prose",
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2676,
+        "latency_ms": 127.00412499998492
+      },
+      {
+        "case_id": "hop-shared-recruiter",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 515,
+        "latency_ms": 124.72563800019998
+      },
+      {
+        "case_id": "hop-library-and-shuttle-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 964,
+        "latency_ms": 127.27614200048265
+      },
+      {
+        "case_id": "hop-exchange-and-standing-gpa",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 744,
+        "latency_ms": 130.32239000040136
+      },
+      {
+        "case_id": "hop-health-center-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 999,
+        "latency_ms": 129.32694199935213
+      },
+      {
+        "case_id": "hop-insurance-and-work",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 504,
+        "latency_ms": 130.0797979993149
+      }
+    ],
+    "error": null,
+    "provider_calls": {
+      "embedding": 48
+    },
+    "tokens": 716
+  },
+  {
+    "name": "dense+multi_query",
+    "cases": [
+      {
+        "case_id": "handbook-quiet-hours",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1287,
+        "latency_ms": 873.7314019999758
+      },
+      {
+        "case_id": "handbook-graduate-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 613,
+        "latency_ms": 612.9912350006634
+      },
+      {
+        "case_id": "handbook-missed-classes",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 697,
+        "latency_ms": 508.19968599989807
+      },
+      {
+        "case_id": "handbook-grade-b-plus",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 594,
+        "latency_ms": 496.87186300070607
+      },
+      {
+        "case_id": "handbook-library-volumes",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1143,
+        "latency_ms": 537.1183600000222
+      },
+      {
+        "case_id": "handbook-help-desk-phone",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1218,
+        "latency_ms": 516.5127750005922
+      },
+      {
+        "case_id": "handbook-spring-registration",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 993,
+        "latency_ms": 508.31446899974253
+      },
+      {
+        "case_id": "handbook-meal-plans",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 521,
+        "latency_ms": 533.0970380000508
+      },
+      {
+        "case_id": "calendar-fall-withdrawal",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 925,
+        "latency_ms": 598.8267579996318
+      },
+      {
+        "case_id": "calendar-juneteenth",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1945,
+        "latency_ms": 777.742262999709
+      },
+      {
+        "case_id": "calendar-registrar-office",
+        "tags": [
+          "fact"
+        ],
+        "hit": false,
+        "recall": 0.0,
+        "reciprocal_rank": 0.0,
+        "passages": 6,
+        "context_tokens": 1543,
+        "latency_ms": 518.1950460000735
+      },
+      {
+        "case_id": "cs-cs330-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 455,
+        "latency_ms": 590.2455839996037
+      },
+      {
+        "case_id": "cs-python-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 498,
+        "latency_ms": 639.185840999744
+      },
+      {
+        "case_id": "cs-mobile-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 221,
+        "latency_ms": 512.3756010007128
+      },
+      {
+        "case_id": "nursing-nurs212-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 516,
+        "latency_ms": 701.7178510004669
+      },
+      {
+        "case_id": "placement-cs-rate",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 564,
+        "latency_ms": 511.175280000316
+      },
+      {
+        "case_id": "placement-career-fair",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 858,
+        "latency_ms": 618.3926530002282
+      },
+      {
+        "case_id": "placement-tariq-alvi",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1262,
+        "latency_ms": 521.3849190004112
+      },
+      {
+        "case_id": "international-insurance-cost",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 467,
+        "latency_ms": 622.915023999667
+      },
+      {
+        "case_id": "international-work-hours",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 441,
+        "latency_ms": 698.4006570000929
+      },
+      {
+        "case_id": "international-night-shuttle",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 964,
+        "latency_ms": 526.671599999645
+      },
+      {
+        "case_id": "infrastructure-diving-pool",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1482,
+        "latency_ms": 533.0473989997699
+      },
+      {
+        "case_id": "infrastructure-climbing-wall",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1644,
+        "latency_ms": 587.6199049998831
+      },
+      {
+        "case_id": "infrastructure-dietician",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 507,
+        "latency_ms": 502.8801899998143
+      },
+      {
+        "case_id": "sports-volleyball-coach",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 855,
+        "latency_ms": 507.8308559996003
+      },
+      {
+        "case_id": "sports-tennis-achievement",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 843,
+        "latency_ms": 563.6341259996698
+      },
+      {
+        "case_id": "exchange-chile-partner",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 747,
+        "latency_ms": 557.7282730000661
+      },
+      {
+        "case_id": "exchange-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 553,
+        "latency_ms": 486.6338239999095
+      },
+      {
+        "case_id": "research-cibr-director",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1150,
+        "latency_ms": 572.5043359998381
+      },
+      {
+        "case_id": "research-cii-projects",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.25,
+        "passages": 6,
+        "context_tokens": 482,
+        "latency_ms": 572.5565250004365
+      },
+      {
+        "case_id": "policy-meal-allowance",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 446,
+        "latency_ms": 507.47632200000226
+      },
+      {
+        "case_id": "policy-conference-count",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 473,
+        "latency_ms": 622.3947759999646
+      },
+      {
+        "case_id": "accreditation-valid-through",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1267,
+        "latency_ms": 491.1831119998169
+      },
+      {
+        "case_id": "awards-teaching",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1241,
+        "latency_ms": 653.1576309998854
+      },
+      {
+        "case_id": "contact-engineering-email",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 654,
+        "latency_ms": 510.9177770000315
+      },
+      {
+        "case_id": "map-night-escort",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 1705,
+        "latency_ms": 488.14470100023755
+      },
+      {
+        "case_id": "markdown-flask-origins",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2565,
+        "latency_ms": 507.31519000055414
+      },
+      {
+        "case_id": "markdown-fastapi-redoc",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 3081,
+        "latency_ms": 547.7648220003175
+      },
+      {
+        "case_id": "markdown-required-query",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2551,
+        "latency_ms": 534.4680470007006
+      },
+      {
+        "case_id": "markdown-requests-install",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2484,
+        "latency_ms": 527.5415799997063
+      },
+      {
+        "case_id": "novel-holmes-the-woman",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 3365,
+        "latency_ms": 533.8697529996352
+      },
+      {
+        "case_id": "novel-utterson-drink",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 3369,
+        "latency_ms": 627.1905339999648
+      },
+      {
+        "case_id": "novel-martians-watching",
+        "tags": [
+          "prose",
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 6,
+        "context_tokens": 3517,
+        "latency_ms": 534.7059229998194
+      },
+      {
+        "case_id": "hop-shared-recruiter",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 515,
+        "latency_ms": 676.5618099998392
+      },
+      {
+        "case_id": "hop-library-and-shuttle-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 911,
+        "latency_ms": 595.2837290005846
+      },
+      {
+        "case_id": "hop-exchange-and-standing-gpa",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 803,
+        "latency_ms": 681.6840490000686
+      },
+      {
+        "case_id": "hop-health-center-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 0.5,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 574,
+        "latency_ms": 700.0402470002882
+      },
+      {
+        "case_id": "hop-insurance-and-work",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 0.5,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 658,
+        "latency_ms": 498.72008799957257
+      }
+    ],
+    "error": null,
+    "provider_calls": {
+      "chat": 48,
+      "embedding": 144
+    },
+    "tokens": 7117
+  },
+  {
+    "name": "dense+decompose",
+    "cases": [
+      {
+        "case_id": "handbook-quiet-hours",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1287,
+        "latency_ms": 588.1732199995895
+      },
+      {
+        "case_id": "handbook-graduate-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 613,
+        "latency_ms": 429.61841499982256
+      },
+      {
+        "case_id": "handbook-missed-classes",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 481,
+        "latency_ms": 602.6615249993483
+      },
+      {
+        "case_id": "handbook-grade-b-plus",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 652,
+        "latency_ms": 499.9431899996125
+      },
+      {
+        "case_id": "handbook-library-volumes",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1143,
+        "latency_ms": 503.54202299968165
+      },
+      {
+        "case_id": "handbook-help-desk-phone",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1278,
+        "latency_ms": 407.7765729998646
+      },
+      {
+        "case_id": "handbook-spring-registration",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 993,
+        "latency_ms": 510.5170589995396
+      },
+      {
+        "case_id": "handbook-meal-plans",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 464,
+        "latency_ms": 505.55364999945596
+      },
+      {
+        "case_id": "calendar-fall-withdrawal",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 925,
+        "latency_ms": 501.98753000040597
+      },
+      {
+        "case_id": "calendar-juneteenth",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2403,
+        "latency_ms": 596.5239540000766
+      },
+      {
+        "case_id": "calendar-registrar-office",
+        "tags": [
+          "fact"
+        ],
+        "hit": false,
+        "recall": 0.0,
+        "reciprocal_rank": 0.0,
+        "passages": 6,
+        "context_tokens": 1543,
+        "latency_ms": 442.79874000039854
+      },
+      {
+        "case_id": "cs-cs330-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 455,
+        "latency_ms": 445.6164640005227
+      },
+      {
+        "case_id": "cs-python-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 480,
+        "latency_ms": 588.4302240001489
+      },
+      {
+        "case_id": "cs-mobile-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 214,
+        "latency_ms": 504.9490310002511
+      },
+      {
+        "case_id": "nursing-nurs212-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 516,
+        "latency_ms": 628.2331859993064
+      },
+      {
+        "case_id": "placement-cs-rate",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 554,
+        "latency_ms": 415.7530789998418
+      },
+      {
+        "case_id": "placement-career-fair",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 858,
+        "latency_ms": 582.8631349995703
+      },
+      {
+        "case_id": "placement-tariq-alvi",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 981,
+        "latency_ms": 614.4812040001852
+      },
+      {
+        "case_id": "international-insurance-cost",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 467,
+        "latency_ms": 611.3331189999371
+      },
+      {
+        "case_id": "international-work-hours",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 6,
+        "context_tokens": 441,
+        "latency_ms": 485.93659100060904
+      },
+      {
+        "case_id": "international-night-shuttle",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 964,
+        "latency_ms": 552.8350129998216
+      },
+      {
+        "case_id": "infrastructure-diving-pool",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1154,
+        "latency_ms": 411.4293410002574
+      },
+      {
+        "case_id": "infrastructure-climbing-wall",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1068,
+        "latency_ms": 508.06654799998796
+      },
+      {
+        "case_id": "infrastructure-dietician",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 507,
+        "latency_ms": 553.2389689997217
+      },
+      {
+        "case_id": "sports-volleyball-coach",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 855,
+        "latency_ms": 465.3511119995528
+      },
+      {
+        "case_id": "sports-tennis-achievement",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 843,
+        "latency_ms": 559.1191829998934
+      },
+      {
+        "case_id": "exchange-chile-partner",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 686,
+        "latency_ms": 466.2306680002075
+      },
+      {
+        "case_id": "exchange-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 714,
+        "latency_ms": 521.6346910001448
+      },
+      {
+        "case_id": "research-cibr-director",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1150,
+        "latency_ms": 487.06692599989765
+      },
+      {
+        "case_id": "research-cii-projects",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.25,
+        "passages": 6,
+        "context_tokens": 569,
+        "latency_ms": 421.63119799988635
+      },
+      {
+        "case_id": "policy-meal-allowance",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 454,
+        "latency_ms": 453.2773239998278
+      },
+      {
+        "case_id": "policy-conference-count",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 477,
+        "latency_ms": 454.3439319995741
+      },
+      {
+        "case_id": "accreditation-valid-through",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1255,
+        "latency_ms": 428.0535059997419
+      },
+      {
+        "case_id": "awards-teaching",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1296,
+        "latency_ms": 474.2389960001674
+      },
+      {
+        "case_id": "contact-engineering-email",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 616,
+        "latency_ms": 403.04789499987237
+      },
+      {
+        "case_id": "map-night-escort",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 1705,
+        "latency_ms": 545.7460159996117
+      },
+      {
+        "case_id": "markdown-flask-origins",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2565,
+        "latency_ms": 450.68324800013215
+      },
+      {
+        "case_id": "markdown-fastapi-redoc",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 6,
+        "context_tokens": 2979,
+        "latency_ms": 428.14236499998515
+      },
+      {
+        "case_id": "markdown-required-query",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2551,
+        "latency_ms": 558.0663090004236
+      },
+      {
+        "case_id": "markdown-requests-install",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1940,
+        "latency_ms": 479.52684000028967
+      },
+      {
+        "case_id": "novel-holmes-the-woman",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 3401,
+        "latency_ms": 506.2809049995849
+      },
+      {
+        "case_id": "novel-utterson-drink",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 3369,
+        "latency_ms": 503.5283960005472
+      },
+      {
+        "case_id": "novel-martians-watching",
+        "tags": [
+          "prose",
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2676,
+        "latency_ms": 529.7025540003233
+      },
+      {
+        "case_id": "hop-shared-recruiter",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 385,
+        "latency_ms": 565.8090300003096
+      },
+      {
+        "case_id": "hop-library-and-shuttle-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 6,
+        "context_tokens": 907,
+        "latency_ms": 498.61524800053303
+      },
+      {
+        "case_id": "hop-exchange-and-standing-gpa",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 811,
+        "latency_ms": 539.9824520000038
+      },
+      {
+        "case_id": "hop-health-center-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1059,
+        "latency_ms": 607.518455999525
+      },
+      {
+        "case_id": "hop-insurance-and-work",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 0.5,
+        "reciprocal_rank": 0.5,
+        "passages": 6,
+        "context_tokens": 658,
+        "latency_ms": 578.9725329996145
+      }
+    ],
+    "error": null,
+    "provider_calls": {
+      "chat": 48,
+      "embedding": 117
+    },
+    "tokens": 7139
+  },
+  {
+    "name": "dense+corrective",
+    "cases": [
+      {
+        "case_id": "handbook-quiet-hours",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 100,
+        "latency_ms": 610.9603610002523
+      },
+      {
+        "case_id": "handbook-graduate-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 66,
+        "latency_ms": 426.0068499997942
+      },
+      {
+        "case_id": "handbook-missed-classes",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 61,
+        "latency_ms": 459.36471999993955
+      },
+      {
+        "case_id": "handbook-grade-b-plus",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 261,
+        "latency_ms": 448.6902429998736
+      },
+      {
+        "case_id": "handbook-library-volumes",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 92,
+        "latency_ms": 532.0399030006229
+      },
+      {
+        "case_id": "handbook-help-desk-phone",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 2,
+        "context_tokens": 456,
+        "latency_ms": 573.8990850004484
+      },
+      {
+        "case_id": "handbook-spring-registration",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 87,
+        "latency_ms": 633.7206230000447
+      },
+      {
+        "case_id": "handbook-meal-plans",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 92,
+        "latency_ms": 542.8408540001328
+      },
+      {
+        "case_id": "calendar-fall-withdrawal",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 428,
+        "latency_ms": 568.6536940002043
+      },
+      {
+        "case_id": "calendar-juneteenth",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 428,
+        "latency_ms": 670.6663020004271
+      },
+      {
+        "case_id": "calendar-registrar-office",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 428,
+        "latency_ms": 574.8690520003947
+      },
+      {
+        "case_id": "cs-cs330-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 73,
+        "latency_ms": 438.3418369998253
+      },
+      {
+        "case_id": "cs-python-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 81,
+        "latency_ms": 415.36210300000675
+      },
+      {
+        "case_id": "cs-mobile-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 74,
+        "latency_ms": 503.69244200010144
+      },
+      {
+        "case_id": "nursing-nurs212-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 75,
+        "latency_ms": 446.69830599923444
+      },
+      {
+        "case_id": "placement-cs-rate",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 61,
+        "latency_ms": 439.8000820001471
+      },
+      {
+        "case_id": "placement-career-fair",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 85,
+        "latency_ms": 463.48686200053635
+      },
+      {
+        "case_id": "placement-tariq-alvi",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 116,
+        "latency_ms": 519.7773729996698
+      },
+      {
+        "case_id": "international-insurance-cost",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 86,
+        "latency_ms": 438.9695270001539
+      },
+      {
+        "case_id": "international-work-hours",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 59,
+        "latency_ms": 415.2753759999541
+      },
+      {
+        "case_id": "international-night-shuttle",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 98,
+        "latency_ms": 543.1008360001215
+      },
+      {
+        "case_id": "infrastructure-diving-pool",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 116,
+        "latency_ms": 505.4284820007524
+      },
+      {
+        "case_id": "infrastructure-climbing-wall",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 103,
+        "latency_ms": 492.30287600039446
+      },
+      {
+        "case_id": "infrastructure-dietician",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 89,
+        "latency_ms": 772.3544000000402
+      },
+      {
+        "case_id": "sports-volleyball-coach",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 169,
+        "latency_ms": 496.69134900068457
+      },
+      {
+        "case_id": "sports-tennis-achievement",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 173,
+        "latency_ms": 533.4735460000957
+      },
+      {
+        "case_id": "exchange-chile-partner",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 3,
+        "context_tokens": 518,
+        "latency_ms": 689.1368389997297
+      },
+      {
+        "case_id": "exchange-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 121,
+        "latency_ms": 461.6462819994922
+      },
+      {
+        "case_id": "research-cibr-director",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 126,
+        "latency_ms": 560.6946059997426
+      },
+      {
+        "case_id": "research-cii-projects",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 53,
+        "latency_ms": 498.97905699981493
+      },
+      {
+        "case_id": "policy-meal-allowance",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 56,
+        "latency_ms": 525.2631579996887
+      },
+      {
+        "case_id": "policy-conference-count",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 84,
+        "latency_ms": 511.00541100004193
+      },
+      {
+        "case_id": "accreditation-valid-through",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 540,
+        "latency_ms": 513.8521640001272
+      },
+      {
+        "case_id": "awards-teaching",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 490,
+        "latency_ms": 509.60330500038253
+      },
+      {
+        "case_id": "contact-engineering-email",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 334,
+        "latency_ms": 613.4290930003772
+      },
+      {
+        "case_id": "map-night-escort",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 2,
+        "context_tokens": 549,
+        "latency_ms": 592.3257880003803
+      },
+      {
+        "case_id": "markdown-flask-origins",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 275,
+        "latency_ms": 798.9915350008232
+      },
+      {
+        "case_id": "markdown-fastapi-redoc",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 3,
+        "context_tokens": 1735,
+        "latency_ms": 857.2358859992164
+      },
+      {
+        "case_id": "markdown-required-query",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 599,
+        "latency_ms": 923.9860689995112
+      },
+      {
+        "case_id": "markdown-requests-install",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 435,
+        "latency_ms": 622.0941889996539
+      },
+      {
+        "case_id": "novel-holmes-the-woman",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 587,
+        "latency_ms": 875.2915449995271
+      },
+      {
+        "case_id": "novel-utterson-drink",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 571,
+        "latency_ms": 781.8485309999232
+      },
+      {
+        "case_id": "novel-martians-watching",
+        "tags": [
+          "prose",
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 599,
+        "latency_ms": 788.8885109996409
+      },
+      {
+        "case_id": "hop-shared-recruiter",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 3,
+        "context_tokens": 277,
+        "latency_ms": 510.672068000531
+      },
+      {
+        "case_id": "hop-library-and-shuttle-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 0.5,
+        "reciprocal_rank": 1.0,
+        "passages": 1,
+        "context_tokens": 451,
+        "latency_ms": 512.7470899997206
+      },
+      {
+        "case_id": "hop-exchange-and-standing-gpa",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 2,
+        "context_tokens": 187,
+        "latency_ms": 509.5917550006561
+      },
+      {
+        "case_id": "hop-health-center-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 2,
+        "context_tokens": 164,
+        "latency_ms": 614.1126270003952
+      },
+      {
+        "case_id": "hop-insurance-and-work",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 2,
+        "context_tokens": 145,
+        "latency_ms": 518.7169490000088
+      }
+    ],
+    "error": null,
+    "provider_calls": {
+      "chat": 48,
+      "embedding": 48
+    },
+    "tokens": 125181
+  },
+  {
+    "name": "dense+compress",
+    "cases": [
+      {
+        "case_id": "handbook-quiet-hours",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1232,
+        "latency_ms": 505.45261499974004
+      },
+      {
+        "case_id": "handbook-graduate-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 429,
+        "latency_ms": 407.44235799957096
+      },
+      {
+        "case_id": "handbook-missed-classes",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 676,
+        "latency_ms": 397.77094000055513
+      },
+      {
+        "case_id": "handbook-grade-b-plus",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 435,
+        "latency_ms": 417.3108049999428
+      },
+      {
+        "case_id": "handbook-library-volumes",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1155,
+        "latency_ms": 539.4127099998514
+      },
+      {
+        "case_id": "handbook-help-desk-phone",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1362,
+        "latency_ms": 614.7084659996835
+      },
+      {
+        "case_id": "handbook-spring-registration",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 993,
+        "latency_ms": 498.49293700026465
+      },
+      {
+        "case_id": "handbook-meal-plans",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 400,
+        "latency_ms": 672.4827529997128
+      },
+      {
+        "case_id": "calendar-fall-withdrawal",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 523,
+        "latency_ms": 540.5057280004257
+      },
+      {
+        "case_id": "calendar-juneteenth",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2003,
+        "latency_ms": 648.5697879998042
+      },
+      {
+        "case_id": "calendar-registrar-office",
+        "tags": [
+          "fact"
+        ],
+        "hit": false,
+        "recall": 0.0,
+        "reciprocal_rank": 0.0,
+        "passages": 6,
+        "context_tokens": 1531,
+        "latency_ms": 579.127086999506
+      },
+      {
+        "case_id": "cs-cs330-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": false,
+        "recall": 0.0,
+        "reciprocal_rank": 0.0,
+        "passages": 6,
+        "context_tokens": 418,
+        "latency_ms": 406.4998359999663
+      },
+      {
+        "case_id": "cs-python-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 450,
+        "latency_ms": 718.198886999744
+      },
+      {
+        "case_id": "cs-mobile-course",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 183,
+        "latency_ms": 606.0030130001905
+      },
+      {
+        "case_id": "nursing-nurs212-prerequisite",
+        "tags": [
+          "keyword"
+        ],
+        "hit": false,
+        "recall": 0.0,
+        "reciprocal_rank": 0.0,
+        "passages": 6,
+        "context_tokens": 479,
+        "latency_ms": 631.6229369995199
+      },
+      {
+        "case_id": "placement-cs-rate",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 557,
+        "latency_ms": 590.8297160003713
+      },
+      {
+        "case_id": "placement-career-fair",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 858,
+        "latency_ms": 500.98262400024396
+      },
+      {
+        "case_id": "placement-tariq-alvi",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1294,
+        "latency_ms": 853.4909919999336
+      },
+      {
+        "case_id": "international-insurance-cost",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 416,
+        "latency_ms": 499.15697799951886
+      },
+      {
+        "case_id": "international-work-hours",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 6,
+        "context_tokens": 632,
+        "latency_ms": 529.1475209996861
+      },
+      {
+        "case_id": "international-night-shuttle",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 964,
+        "latency_ms": 596.0026769998876
+      },
+      {
+        "case_id": "infrastructure-diving-pool",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1154,
+        "latency_ms": 540.458641999976
+      },
+      {
+        "case_id": "infrastructure-climbing-wall",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1055,
+        "latency_ms": 480.9660970004188
+      },
+      {
+        "case_id": "infrastructure-dietician",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 451,
+        "latency_ms": 408.9093339998726
+      },
+      {
+        "case_id": "sports-volleyball-coach",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 731,
+        "latency_ms": 407.54227899924445
+      },
+      {
+        "case_id": "sports-tennis-achievement",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 714,
+        "latency_ms": 463.9554389996192
+      },
+      {
+        "case_id": "exchange-chile-partner",
+        "tags": [
+          "table"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 542,
+        "latency_ms": 393.73488499950327
+      },
+      {
+        "case_id": "exchange-gpa",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 627,
+        "latency_ms": 473.1717650001883
+      },
+      {
+        "case_id": "research-cibr-director",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1062,
+        "latency_ms": 483.39567800030636
+      },
+      {
+        "case_id": "research-cii-projects",
+        "tags": [
+          "split"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.25,
+        "passages": 6,
+        "context_tokens": 458,
+        "latency_ms": 436.3561459995253
+      },
+      {
+        "case_id": "policy-meal-allowance",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 435,
+        "latency_ms": 511.36183200014784
+      },
+      {
+        "case_id": "policy-conference-count",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 438,
+        "latency_ms": 511.0648649997529
+      },
+      {
+        "case_id": "accreditation-valid-through",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 757,
+        "latency_ms": 512.7902300000642
+      },
+      {
+        "case_id": "awards-teaching",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 854,
+        "latency_ms": 715.0537420002365
+      },
+      {
+        "case_id": "contact-engineering-email",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 593,
+        "latency_ms": 457.9551269998774
+      },
+      {
+        "case_id": "map-night-escort",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "passages": 6,
+        "context_tokens": 1489,
+        "latency_ms": 773.1199079998987
+      },
+      {
+        "case_id": "markdown-flask-origins",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2312,
+        "latency_ms": 998.6098129993479
+      },
+      {
+        "case_id": "markdown-fastapi-redoc",
+        "tags": [
+          "keyword"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 0.5,
+        "passages": 6,
+        "context_tokens": 1398,
+        "latency_ms": 837.7818529997967
+      },
+      {
+        "case_id": "markdown-required-query",
+        "tags": [
+          "paraphrase"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2551,
+        "latency_ms": 728.8328329996148
+      },
+      {
+        "case_id": "markdown-requests-install",
+        "tags": [
+          "fact"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 1249,
+        "latency_ms": 638.184516000365
+      },
+      {
+        "case_id": "novel-holmes-the-woman",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2851,
+        "latency_ms": 968.6930480002047
+      },
+      {
+        "case_id": "novel-utterson-drink",
+        "tags": [
+          "prose"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 2827,
+        "latency_ms": 730.6573860005301
+      },
+      {
+        "case_id": "novel-martians-watching",
+        "tags": [
+          "prose",
+          "paraphrase"
+        ],
+        "hit": false,
+        "recall": 0.0,
+        "reciprocal_rank": 0.0,
+        "passages": 6,
+        "context_tokens": 1678,
+        "latency_ms": 1226.5689820005719
+      },
+      {
+        "case_id": "hop-shared-recruiter",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 211,
+        "latency_ms": 669.1174659999888
+      },
+      {
+        "case_id": "hop-library-and-shuttle-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 447,
+        "latency_ms": 595.8329369996136
+      },
+      {
+        "case_id": "hop-exchange-and-standing-gpa",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 673,
+        "latency_ms": 404.7722490004162
+      },
+      {
+        "case_id": "hop-health-center-hours",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 999,
+        "latency_ms": 696.5491350001685
+      },
+      {
+        "case_id": "hop-insurance-and-work",
+        "tags": [
+          "multi_hop"
+        ],
+        "hit": true,
+        "recall": 1.0,
+        "reciprocal_rank": 1.0,
+        "passages": 6,
+        "context_tokens": 504,
+        "latency_ms": 598.6933639997005
+      }
+    ],
+    "error": null,
+    "provider_calls": {
+      "chat": 48,
+      "embedding": 48
+    },
+    "tokens": 78804
+  }
+]
