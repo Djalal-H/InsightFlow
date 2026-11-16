@@ -1,7 +1,7 @@
 """Provider-independent embedding contract backed by LiteLLM."""
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Any, Protocol
 
 from litellm import aembedding, token_counter
 from litellm.exceptions import (
@@ -25,7 +25,7 @@ from insightflow.core.exceptions import (
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
-from insightflow.providers.llm import report_response_usage
+from insightflow.providers.llm import report_response_usage, request_options
 
 
 class EmbeddingProvider(Protocol):
@@ -54,6 +54,7 @@ class LiteLLMEmbeddingProvider:
         *,
         query_input_type: str | None = None,
         document_input_type: str | None = None,
+        max_retries: int = 0,
     ) -> None:
         normalized_model = model.strip()
         if not normalized_model:
@@ -61,17 +62,13 @@ class LiteLLMEmbeddingProvider:
         self._model = normalized_model
         self._api_key = api_key
         self._api_base = api_base
+        self._max_retries = max(0, max_retries)
         self._query_input_type = (query_input_type or "").strip() or None
         self._document_input_type = (document_input_type or "").strip() or None
 
-    def _request_options(self) -> dict[str, str]:
-        """Return only explicitly configured connection options for LiteLLM."""
-        options: dict[str, str] = {}
-        if self._api_key:
-            options["api_key"] = self._api_key
-        if self._api_base:
-            options["api_base"] = self._api_base
-        return options
+    def _request_options(self) -> dict[str, Any]:
+        """Return only explicitly configured connection and retry options for LiteLLM."""
+        return request_options(self._api_key, self._api_base, self._max_retries)
 
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed document inputs while preserving their input order."""

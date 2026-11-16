@@ -193,10 +193,36 @@ Kubernetes, multiple application services, Redis, a LiteLLM Proxy, and infrastru
 be selected only if deployment requirements justify them. Dockerizing Qdrant locally does not require
 containerizing the application at Stage 1.
 
+Implementation (2026-11-15): the author chose JWT authentication, Redis for rate limits and quotas,
+GitHub Actions, a human approval step (LangGraph `interrupt`) for consequential tools, two image
+targets, and one branch for the stage. Prompt-injection controls follow the OWASP LLM Prompt
+Injection Prevention Cheat Sheet, spotlighting (Hines et al., 2024), and the agent design patterns
+of Beurer-Kellner et al. (2025). Redis is adopted only for counters; no other new service.
+
+| Core work | Implementation |
+| --- | --- |
+| Authentication, authorization | `security/auth.py` (PyJWT; JWKS or HS256, algorithm allowlist, required claims), scopes per route (`api/security.py`), thread owners (404 for other users) |
+| Rate limiting and quotas | `security/rate_limit.py`: GCRA and daily request/token quotas in one Redis Lua script; 429 with `Retry-After`; fail-closed by default |
+| Secret management, log hygiene | `SecretStr` for every credential, `SECRETS_DIR` secret files, JWT redaction, LiteLLM message logging off, a DEBUG-level log test with canaries |
+| Prompt-injection controls | `guardrails/`: invisible-text removal, heuristic screen (drop suspicious web pages), spotlighting with a per-prompt nonce, answer checks (canary, exfiltration links, secrets, size), optional Llama Guard classifier; `evaluation/injection_cases.jsonl` |
+| Authorization of consequential tools | Deny by default (`read_only_tools`), hidden without `tools:consequential`, `approve` node with `interrupt`, `POST /threads/{id}/approvals/{approval_id}`, a second check in `act` |
+| Dockerfile and CI | `Dockerfile` (`api` ~400 MB, `ingest` with CPU torch), `compose.yaml` (Redis, `api` profile), `.github/workflows/ci.yml`, Dependabot, pinned requirements and lock files |
+| Backup and migration | `python -m insightflow.ops` (`backup`, `restore`, `switch-alias`, `prune-threads`), `docs/operations.md` |
+| Load tests and failure simulations | `scripts/load_test.py`; `tests/integration/test_failure_simulation.py`; LiteLLM retries (`PROVIDER_MAX_RETRIES`) |
+
+Not done in this stage: a CaMeL-style dual-model execution (plans from trusted input only), a
+hosted classifier made for prompt injection (Llama Guard finds harmful content), hidden-text
+checks of documents at ingestion (rendered page against extracted text), token streaming of a
+resumed approval run, per-tenant quotas or organizations, mTLS between services, image signing
+and publishing to a registry, Kubernetes, infrastructure as code, and a LiteLLM Proxy.
+
 ## Dependency policy
 
-- `requirements.txt` contains direct runtime dependencies only.
-- `requirements-dev.txt` includes runtime requirements plus test, lint, formatting, and typing tools.
+- `requirements.txt` contains the direct runtime dependencies of the API only.
+- `requirements-ingest.txt` adds the document parsers that only the ingestion CLI needs.
+- `requirements-dev.txt` includes both plus test, lint, formatting, and typing tools.
+- `requirements.lock` and `requirements-ingest.lock` (generated with `uv pip compile`) fix every
+  transitive version for the Docker images and CI.
 - Direct dependencies are pinned and updated deliberately after compatibility checks.
 - Provider-specific packages, document loaders, and infrastructure clients are added in the stage
   that first imports them.

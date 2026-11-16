@@ -16,8 +16,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from insightflow.agents.models import SEARCH_TOOL
-from insightflow.rag.ingestion import MIME_TYPES_BY_SUFFIX
-from insightflow.rag.models import ContextBudget, RetrievalQuery, RetrievedChunk
+from insightflow.rag.models import (
+    MIME_TYPES_BY_SUFFIX,
+    ContextBudget,
+    RetrievalQuery,
+    RetrievedChunk,
+)
 from insightflow.rag.protocols import ContextAssembler, Retriever
 from insightflow.tools.models import ToolResult, ToolSpec
 from insightflow.tools.validation import argument_problem

@@ -2,11 +2,14 @@
 
 import logging
 import uuid
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from insightflow.agents.checkpoint import thread_config
+from insightflow.agents.checkpoint import read_thread, thread_config
 from insightflow.agents.document_search import DocumentSearch
 from insightflow.agents.graph import AgentGraph, WorkflowNodes, build_graph, recursion_limit
 from insightflow.agents.memory import ConversationMemory
@@ -14,6 +17,7 @@ from insightflow.agents.models import SEARCH_TOOL
 from insightflow.agents.nodes.act import make_act_node
 from insightflow.agents.nodes.agent import make_agent_node
 from insightflow.agents.nodes.answer import make_answer_node
+from insightflow.agents.nodes.approve import make_approve_node
 from insightflow.agents.nodes.finalize import make_finalize_node
 from insightflow.agents.nodes.recall import make_recall_node
 from insightflow.agents.nodes.retry import retry_node
@@ -27,6 +31,7 @@ from insightflow.agents.observations import (
 from insightflow.agents.state import AgentState, new_turn_input
 from insightflow.api.schemas import (
     ExecutionMetadata,
+    PendingApproval,
     ProviderUsage,
     QueryRequest,
     QueryResponse,
@@ -38,16 +43,24 @@ from insightflow.api.schemas import (
     WebSourceReference,
 )
 from insightflow.core.config import Settings
+from insightflow.core.exceptions import InputRejectedError, ThreadNotFoundError
 from insightflow.core.observability import (
     PROVIDER_KINDS,
     RunRecorder,
     TraceSink,
     export_run,
 )
+from insightflow.guardrails.classifier import SafetyClassifier
+from insightflow.guardrails.output import AnswerGuard
+from insightflow.guardrails.screen import screen
+from insightflow.guardrails.text import strip_invisible
 from insightflow.providers.instrumented import instrument_chat
 from insightflow.providers.llm import ChatProvider
 from insightflow.rag.models import ContextBudget
 from insightflow.rag.protocols import ContextAssembler, Retriever
+from insightflow.security.audit import audit
+from insightflow.security.auth import LOCAL_PRINCIPAL, Principal
+from insightflow.security.rate_limit import RateLimiter
 from insightflow.tools.registry import ToolSet
 
 logger = logging.getLogger("insightflow.query")
@@ -63,10 +76,13 @@ def build_workflow(
     tools: ToolSet | None = None,
     memory: ConversationMemory | None = None,
     stream_tokens: bool = False,
+    safety: SafetyClassifier | None = None,
 ) -> AgentGraph:
     """Build the ReAct workflow for one request.
 
-    Conversation memory needs a thread, so `memory` is ignored without a checkpointer.
+    Conversation memory needs a thread, so `memory` is ignored without a checkpointer. A
+    consequential tool call can pause for approval only with a checkpointer; without one it is
+    refused. `safety` is the optional content-safety classifier for answers.
     """
     if checkpointer is None:
         memory = None
@@ -90,15 +106,22 @@ def build_workflow(
             history_turns=settings.agent_history_turns,
             search_spec=search.spec,
             multi_hop=settings.agent_multi_hop_enabled,
+            datamark_web=settings.guard_datamark_web,
         ),
-        act=make_act_node(search, tool_set),
+        act=make_act_node(search, tool_set, web_action=settings.guard_web_action),
         answer=make_answer_node(
             chat_provider,
             history_turns=settings.agent_history_turns,
             stream_tokens=stream_tokens,
+            guard=AnswerGuard(
+                secrets=settings.secret_values(), max_chars=settings.guard_answer_max_chars
+            ),
+            safety=safety,
+            datamark_web=settings.guard_datamark_web,
         ),
         verify=make_verify_node(
-            chat_provider if settings.agent_verifier_llm_enabled else None
+            chat_provider if settings.agent_verifier_llm_enabled else None,
+            datamark_web=settings.guard_datamark_web,
         ),
         retry=retry_node,
         finalize=make_finalize_node(memory),
@@ -107,6 +130,7 @@ def build_workflow(
             if memory is not None
             else None
         ),
+        approve=make_approve_node(tool_set, can_pause=checkpointer is not None),
     )
     return build_graph(nodes, max_attempts=settings.agent_max_attempts, checkpointer=checkpointer)
 
@@ -124,7 +148,54 @@ def resolve_thread(
     return thread_id, {**thread_config(thread_id), "recursion_limit": limit}
 
 
-def turn_input(request: QueryRequest, thread_id: str | None) -> AgentState:
+@dataclass(frozen=True)
+class ThreadAccess:
+    """The thread of one request after the owner check."""
+
+    thread_id: str | None
+    config: RunnableConfig
+    owner: str | None
+    """The owner key to write with the turn; `None` leaves the stored owner as it is."""
+
+
+async def open_thread(
+    requested: str | None,
+    checkpointer: BaseCheckpointSaver[str] | None,
+    settings: Settings,
+    principal: Principal = LOCAL_PRINCIPAL,
+) -> ThreadAccess:
+    """Resolve the thread and check that the caller may continue it.
+
+    A thread of another owner, or one without an owner (written before Stage 8), is reported as
+    not found unless the caller is an administrator, so a request cannot find out which thread
+    identifiers exist.
+    """
+    thread_id, config = resolve_thread(requested, checkpointer, settings)
+    if thread_id is None or checkpointer is None:
+        return ThreadAccess(thread_id, config, None)
+    stored = await read_thread(checkpointer, thread_id) if requested else None
+    if stored is None:
+        return ThreadAccess(thread_id, config, principal.owner_key)
+    require_thread_access(principal, stored.owner)
+    owner = principal.owner_key if stored.owner == principal.owner_key else None
+    return ThreadAccess(thread_id, config, owner)
+
+
+def require_thread_access(principal: Principal, owner: str | None) -> None:
+    """Raise `ThreadNotFoundError` when the caller may not use a thread with this owner."""
+    if not principal.may_access(owner):
+        audit("thread_access_denied", has_owner=owner is not None)
+        raise ThreadNotFoundError
+
+
+def turn_input(
+    request: QueryRequest,
+    thread_id: str | None,
+    *,
+    principal: Principal = LOCAL_PRINCIPAL,
+    owner: str | None = None,
+    guard_signals: Iterable[str] = (),
+) -> AgentState:
     """Return the graph input for a request, with its document filters as the search scope."""
     scope: dict[str, list[str]] = {}
     if request.filters is not None:
@@ -132,7 +203,14 @@ def turn_input(request: QueryRequest, thread_id: str | None) -> AgentState:
             scope["file_types"] = list(dict.fromkeys(request.filters.file_types))
         if request.filters.sources:
             scope["sources"] = list(dict.fromkeys(request.filters.sources))
-    return new_turn_input(request.query, thread_id=thread_id, search_scope=scope)
+    return new_turn_input(
+        request.query,
+        thread_id=thread_id,
+        search_scope=scope,
+        granted_scopes=principal.scopes,
+        guard_signals=guard_signals,
+        owner=owner,
+    )
 
 
 def to_query_response(
@@ -163,8 +241,11 @@ def to_query_response(
         for observation in observations
     ]
     verification = state.get("verification")
+    pending = pending_approval(state)
     return QueryResponse(
-        answer=state.get("answer", ""),
+        status="approval_required" if pending is not None else "completed",
+        pending_approval=pending,
+        answer=state.get("answer", "") if pending is None else "",
         sources=[_source_reference(source) for source in numbered],
         thread_id=thread_id,
         verification=VerificationReport(
@@ -184,8 +265,48 @@ def to_query_response(
             recalled_turns=len(state.get("recalled", [])),
             duration_ms=duration_ms,
             usage=usage_report(state, recorder),
+            guardrails=list(dict.fromkeys(state.get("guard_signals", []))),
         ),
     )
+
+
+def pending_approval(state: Mapping[str, Any]) -> PendingApproval | None:
+    """The approval that a paused run waits for (LangGraph puts it under `__interrupt__`)."""
+    for item in state.get("__interrupt__", ()) or ():
+        value = getattr(item, "value", None)
+        if isinstance(value, dict) and "approval_id" in value:
+            return PendingApproval.model_validate(value)
+    return None
+
+
+async def screen_query(
+    request: QueryRequest, settings: Settings, safety: SafetyClassifier | None = None
+) -> tuple[QueryRequest, list[str]]:
+    """Clean and screen the question; return the request to run and the signals found.
+
+    Invisible characters are removed from the question that the model receives. A screen
+    signal is reported, or refused with `GUARD_INPUT_ACTION=block`; the optional safety
+    classifier refuses unsafe questions.
+    """
+    cleaned, _ = strip_invisible(request.query)
+    signals = [f"query:{name}" for name in screen(request.query)]
+    if signals:
+        audit("query_flagged", signals=signals, action=settings.guard_input_action)
+        if settings.guard_input_action == "block":
+            raise InputRejectedError("screen")
+    if not cleaned.strip():
+        raise InputRejectedError("empty_after_cleaning")
+    if safety is not None and not (await safety.check_input(cleaned)).safe:
+        raise InputRejectedError("unsafe")
+    return request.model_copy(update={"query": cleaned}), signals
+
+
+async def charge_usage(
+    limiter: RateLimiter | None, principal: Principal, recorder: RunRecorder
+) -> None:
+    """Count the request's model tokens against the user's daily quota."""
+    if limiter is not None:
+        await limiter.charge_tokens(principal.user_key, recorder.total_tokens())
 
 
 def usage_report(state: AgentState, recorder: RunRecorder | None) -> UsageReport:

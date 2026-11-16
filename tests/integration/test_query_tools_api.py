@@ -11,9 +11,17 @@ from insightflow.core.config import Settings
 from insightflow.core.exceptions import ToolError
 from insightflow.tools.calculator_server import create_calculator_server
 from insightflow.tools.mcp_client import McpToolClient
-from insightflow.tools.registry import ToolRegistration, ToolSet
+from insightflow.tools.registry import ToolSet
 from insightflow.tools.web_search import parse_tavily_sources
-from tests.fakes import ANSWER, TAVILY_TEXT, FakeToolClient, ScriptedChatProvider, action, search
+from tests.fakes import (
+    ANSWER,
+    TAVILY_TEXT,
+    FakeToolClient,
+    ScriptedChatProvider,
+    action,
+    read_only_registration,
+    search,
+)
 from tests.integration.test_query_api import FakeRetriever, client_for, make_app, make_candidate
 from tests.integration.test_query_stream_api import stream_query
 
@@ -33,7 +41,7 @@ def app_with_tools(
 
 def calculator_tools() -> ToolSet:
     calculator = McpToolClient(create_calculator_server(), server_name="calculator")
-    return ToolSet([ToolRegistration(calculator)])
+    return ToolSet([read_only_registration(calculator, "calculate")])
 
 
 async def test_query_reports_each_step_with_its_tool_call() -> None:
@@ -78,7 +86,7 @@ async def test_query_reports_each_step_with_its_tool_call() -> None:
 
 async def test_query_returns_document_and_web_sources_in_one_numbering() -> None:
     web = FakeToolClient("tavily", ["web_search"], replies={"web_search": TAVILY_TEXT})
-    tools = ToolSet([ToolRegistration(web, source_parser=parse_tavily_sources)])
+    tools = ToolSet([read_only_registration(web, source_parser=parse_tavily_sources)])
     chat = ScriptedChatProvider(
         agent=[search("FastAPI"), action("web_search", query="FastAPI news"), ANSWER],
         answer="FastAPI [1] adds native SSE [2].",
@@ -135,7 +143,7 @@ async def test_default_bounds_run_within_the_recursion_limit() -> None:
 async def test_server_that_is_down_is_tried_once_per_cooldown() -> None:
     """Regression: a server whose listing failed was tried again on every agent step."""
     down = FakeToolClient("tavily", ["tavily_search"], list_error=ToolError())
-    tools = ToolSet([ToolRegistration(down)])
+    tools = ToolSet([read_only_registration(down)])
     chat = ScriptedChatProvider(agent=[search("a"), search("b"), search("c"), ANSWER])
 
     application = app_with_tools(chat, tools, agent_max_steps=4)

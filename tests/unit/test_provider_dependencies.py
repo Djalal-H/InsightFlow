@@ -23,6 +23,7 @@ def test_chat_provider_selection_comes_from_settings(model: str) -> None:
         litellm_chat_model=model,
         litellm_api_key="test-key",
         litellm_api_base="https://provider.test/v1",
+        provider_max_retries=3,
     )
 
     with patch(
@@ -36,6 +37,7 @@ def test_chat_provider_selection_comes_from_settings(model: str) -> None:
         model=model,
         api_key="test-key",
         api_base="https://provider.test/v1",
+        max_retries=3,
     )
 
 
@@ -53,3 +55,14 @@ def test_chat_provider_dependency_returns_protocol_implementation() -> None:
         provider = get_chat_provider(settings)
 
     assert isinstance(provider, LiteLLMChatProvider)
+
+
+def test_request_options_send_retries_only_when_configured() -> None:
+    from insightflow.providers.llm import request_options
+
+    assert request_options(None, None, 0) == {}
+    assert request_options("key", "https://base.test", 2) == {
+        "api_key": "key",
+        "api_base": "https://base.test",
+        "num_retries": 2,
+    }

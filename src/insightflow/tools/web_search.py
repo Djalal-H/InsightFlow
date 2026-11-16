@@ -43,6 +43,7 @@ def create_tavily_registration(
         client=client,
         fixed_arguments={TAVILY_SEARCH_TOOL: fixed},
         source_parser=lambda result: parse_tavily_sources(result, max_page_chars=page_chars),
+        read_only_tools=frozenset({TAVILY_SEARCH_TOOL}),
     )
 
 

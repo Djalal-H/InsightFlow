@@ -1,6 +1,11 @@
-"""Retrieval-augmented generation domain."""
+"""Retrieval-augmented generation domain.
 
-from insightflow.rag.chunkers import MaxMinSemanticChunker
+`DoclingPdfParser` and `MaxMinSemanticChunker` load on first use, so the API process (which
+needs neither) does not import docling, its model stack, or the chunker's provider code.
+"""
+
+from typing import TYPE_CHECKING, Any
+
 from insightflow.rag.config import (
     ChunkingConfig,
     EmbeddingConfig,
@@ -19,7 +24,6 @@ from insightflow.rag.models import (
     RetrievalQuery,
     RetrievedChunk,
 )
-from insightflow.rag.parsers import DoclingPdfParser
 from insightflow.rag.protocols import (
     ChunkContextualizer,
     Chunker,
@@ -27,6 +31,24 @@ from insightflow.rag.protocols import (
     DocumentParser,
     Retriever,
 )
+
+if TYPE_CHECKING:
+    from insightflow.rag.chunkers.max_min import MaxMinSemanticChunker
+    from insightflow.rag.parsers.docling_pdf import DoclingPdfParser
+
+
+def __getattr__(name: str) -> Any:
+    """Import the heavy exports only when they are used (PEP 562)."""
+    if name == "DoclingPdfParser":
+        from insightflow.rag.parsers.docling_pdf import DoclingPdfParser
+
+        return DoclingPdfParser
+    if name == "MaxMinSemanticChunker":
+        from insightflow.rag.chunkers.max_min import MaxMinSemanticChunker
+
+        return MaxMinSemanticChunker
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "AssembledContext",

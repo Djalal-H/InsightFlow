@@ -17,6 +17,10 @@ ThreadId = Annotated[
 ]
 
 
+QUERY_MAX_CHARS = 4000
+"""Longer questions are refused (422): a length limit is the first input screen (OWASP)."""
+
+
 class QueryFilters(BaseModel):
     """Metadata filters that limit every document search of the request."""
 
@@ -37,7 +41,12 @@ class QueryFilters(BaseModel):
 class QueryRequest(BaseModel):
     """Request payload for POST /query and POST /query/stream."""
 
-    query: str = Field(..., min_length=1, description="The user's natural-language question.")
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=QUERY_MAX_CHARS,
+        description="The user's natural-language question.",
+    )
     filters: QueryFilters | None = Field(
         default=None, description="Optional limits for document search. Web search ignores them."
     )
@@ -102,7 +111,15 @@ class StepReport(BaseModel):
     call_id: str
     status: Literal["ok", "error"]
     error: (
-        Literal["unknown_tool", "invalid_arguments", "tool_failed", "timeout", "unavailable"]
+        Literal[
+            "unknown_tool",
+            "invalid_arguments",
+            "tool_failed",
+            "timeout",
+            "unavailable",
+            "not_authorized",
+            "not_approved",
+        ]
         | None
     ) = None
     truncated: bool = Field(False, description="The tool output was cut to the size limit.")
@@ -166,11 +183,35 @@ class ExecutionMetadata(BaseModel):
     )
     duration_ms: int = Field(..., ge=0)
     usage: UsageReport = Field(default_factory=lambda: UsageReport())
+    guardrails: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What the guardrails found or changed, as `<where>:<signal>` codes, for example "
+            "`query:instruction_override`, `web:hidden_text`, or `answer:external_link`."
+        ),
+    )
+
+
+class PendingApproval(BaseModel):
+    """A consequential tool call that waits for the user's decision."""
+
+    approval_id: str = Field(..., description="Send it back with the decision.")
+    tool: str
+    server: str
+    arguments: dict[str, Any] = Field(..., description="Exactly what the tool will receive.")
+    thought: str = Field(default="", description="The agent's short reason for the call.")
 
 
 class QueryResponse(BaseModel):
     """Response payload for POST /query, and the final event of POST /query/stream."""
 
+    status: Literal["completed", "approval_required"] = Field(
+        default="completed",
+        description=(
+            "approval_required: the run is paused before a consequential tool call; send a "
+            "decision to POST /threads/{thread_id}/approvals/{approval_id}. `answer` is empty."
+        ),
+    )
     answer: str
     sources: list[Source] = Field(default_factory=list)
     thread_id: str | None = Field(
@@ -178,6 +219,13 @@ class QueryResponse(BaseModel):
     )
     verification: VerificationReport
     metadata: ExecutionMetadata
+    pending_approval: PendingApproval | None = None
+
+
+class ApprovalDecision(BaseModel):
+    """Request payload for POST /threads/{thread_id}/approvals/{approval_id}."""
+
+    decision: Literal["approve", "reject"]
 
 
 class ConversationTurnResponse(BaseModel):
@@ -204,6 +252,14 @@ class ErrorDetail(BaseModel):
         "provider_error",
         "storage_unavailable",
         "thread_not_found",
+        "unauthorized",
+        "forbidden",
+        "rate_limited",
+        "quota_exceeded",
+        "rate_limiter_unavailable",
+        "input_rejected",
+        "approval_not_found",
+        "payload_too_large",
     ]
     message: str
 

@@ -76,8 +76,8 @@ def renumber(candidates: list[RetrievedChunk]) -> list[RetrievedChunk]:
     ]
 
 
-def render_context_block(citation: int, candidate: RetrievedChunk) -> str:
-    """Render one numbered passage with the provenance a reader can cite."""
+def render_context_header(citation: int, candidate: RetrievedChunk) -> str:
+    """The numbered provenance line(s) of a passage: source, pages, and section."""
     chunk = candidate.chunk
     header = f"[{citation}] {candidate.source_identifier}"
     if chunk.page_start is not None:
@@ -87,7 +87,12 @@ def render_context_block(citation: int, candidate: RetrievedChunk) -> str:
             header += f" (pages {chunk.page_start}-{chunk.page_end})"
     if chunk.heading_path:
         header += f"\nSection: {' > '.join(chunk.heading_path)}"
-    return f"{header}\n{chunk.content}"
+    return header
+
+
+def render_context_block(citation: int, candidate: RetrievedChunk) -> str:
+    """Render one numbered passage with the provenance a reader can cite."""
+    return f"{render_context_header(citation, candidate)}\n{candidate.chunk.content}"
 
 
 class BudgetedContextAssembler:

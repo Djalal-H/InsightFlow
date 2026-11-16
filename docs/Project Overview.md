@@ -97,15 +97,21 @@ persistent LangGraph checkpoints should be added when the relevant external inte
 │   ├── agents/                 # LangGraph state, graph, and nodes
 │   ├── rag/                    # Ingestion and retrieval domain boundaries
 │   ├── providers/              # LiteLLM chat and embedding adapters
-│   ├── storage/                # Qdrant adapter
+│   ├── storage/                # Qdrant and Redis adapters, backups
+│   ├── security/               # JWT auth, scopes, rate limits, audit log
+│   ├── guardrails/             # Prompt-injection controls
 │   └── core/                   # Settings, logging, and shared errors
 ├── tests/
 │   ├── unit/
 │   └── integration/
 ├── docs/
-├── compose.yaml                # Local Qdrant only
-├── requirements.txt
-├── requirements-dev.txt
+├── .github/workflows/ci.yml    # Lint, types, tests, images, dependency audit
+├── Dockerfile                  # `api` and `ingest` targets
+├── compose.yaml                # Qdrant, Redis, and the API (profile `app`)
+├── requirements.txt            # API runtime (pinned)
+├── requirements-ingest.txt     # + document parsers
+├── requirements-dev.txt        # + test, lint, and type tools
+├── requirements*.lock          # Exact versions for images and CI
 ├── pyproject.toml
 ├── .env.example
 └── README.md

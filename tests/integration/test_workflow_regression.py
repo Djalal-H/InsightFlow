@@ -14,8 +14,14 @@ import pytest
 
 from insightflow.api.dependencies import get_tool_set
 from insightflow.core.exceptions import StorageError
-from insightflow.tools.registry import ToolRegistration, ToolSet
-from tests.fakes import FakeToolClient, ScriptedChatProvider, StaticRetriever, make_candidate
+from insightflow.tools.registry import ToolSet
+from tests.fakes import (
+    FakeToolClient,
+    ScriptedChatProvider,
+    StaticRetriever,
+    make_candidate,
+    read_only_registration,
+)
 from tests.integration.test_query_api import client_for, make_app
 
 DATASET = Path(__file__).parents[2] / "evaluation" / "workflow_cases.jsonl"
@@ -45,11 +51,12 @@ async def run_case(case: dict[str, Any]) -> tuple[ScriptedChatProvider, dict[str
     tools = ToolSet()
     if case.get("tools"):
         client = FakeToolClient("fake", case["tools"], call_error=case.get("tool_error"))
-        tools = ToolSet([ToolRegistration(client)], failure_cooldown_seconds=0)
+        tools = ToolSet([read_only_registration(client)], failure_cooldown_seconds=0)
     application.dependency_overrides[get_tool_set] = lambda: tools
     async with client_for(application) as client:
         response = await client.post("/query", json={"query": "What is the late fee?"})
-    return chat, {"status": response.status_code, **response.json()}
+    # The HTTP status replaces the body's own `status` (completed / approval_required).
+    return chat, {**response.json(), "status": response.status_code}
 
 
 def observed(chat: ScriptedChatProvider, body: dict[str, Any]) -> dict[str, Any]:

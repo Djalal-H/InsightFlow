@@ -7,7 +7,7 @@ from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
-from insightflow.core.config import Settings, get_settings
+from insightflow.core.config import Settings, get_settings, secret_text
 from insightflow.core.exceptions import InsightFlowError, ProviderConfigurationError
 from insightflow.providers.embeddings import LiteLLMEmbeddingProvider
 from insightflow.rag.config import ChunkingConfig, EmbeddingConfig, IngestionConfig
@@ -68,7 +68,7 @@ async def run(corpus_dir: Path, settings: Settings, *, force: bool) -> list[Inge
     embedding_config = embedding_config_from_settings(settings)
     embedding_provider = LiteLLMEmbeddingProvider(
         model=settings.litellm_embedding_model,
-        api_key=settings.litellm_api_key,
+        api_key=secret_text(settings.litellm_api_key),
         api_base=settings.litellm_api_base,
         query_input_type=settings.embedding_query_input_type,
         document_input_type=settings.embedding_document_input_type,

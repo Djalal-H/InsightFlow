@@ -3,7 +3,8 @@
 The workflow is a ReAct loop with a verified answer::
 
     START → agent ⇄ act               (search_documents, calculate, tavily_search, ...)
-              │
+              │  ↘ approve ─┬→ act    (consequential tools: pause for the user's decision)
+              │             └→ agent  (refused or rejected)
               └→ answer ─┬─ verify ─┬─ finalize → END
                          │          └─ retry → agent   (failed, attempts left)
                          └─ finalize → END             (no observations: direct reply)
@@ -42,12 +43,20 @@ class WorkflowNodes:
     retry: AgentNode
     finalize: AgentNode
     recall: AgentNode | None = None
+    approve: AgentNode | None = None
 
 
-def after_agent(state: AgentState) -> Literal["act", "answer"]:
-    """Run the chosen tool, or answer when the agent chose `answer`."""
+def after_agent(state: AgentState) -> Literal["act", "approve", "answer"]:
+    """Run the chosen tool, ask for approval first when it is consequential, or answer."""
     action = state.get("pending_action")
-    return "answer" if action is None or action.is_answer else "act"
+    if action is None or action.is_answer:
+        return "answer"
+    return "approve" if state.get("pending_consequential") else "act"
+
+
+def after_approve(state: AgentState) -> Literal["act", "agent"]:
+    """An approved call runs; a refused or rejected one goes back to the agent."""
+    return "act" if state.get("pending_action") is not None else "agent"
 
 
 def after_answer(state: AgentState) -> Literal["verify", "finalize"]:
@@ -72,7 +81,8 @@ def make_after_verify(max_attempts: int) -> Callable[[AgentState], Literal["retr
 
 def recursion_limit(max_steps: int, max_attempts: int) -> int:
     """The LangGraph step limit that the bounded loops can never reach, plus a margin."""
-    per_attempt = 2 * max_steps + 3  # agent/act pairs, the final agent, answer, and verify
+    # agent/approve/act per step, the final agent, answer, and verify.
+    per_attempt = 3 * max_steps + 3
     # One retry per attempt, then recall, finalize, and a margin.
     return max_attempts * (per_attempt + 1) + 3
 
@@ -108,7 +118,15 @@ def build_graph(
         graph.add_edge("recall", "agent")
     else:
         graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", after_agent)
+    if nodes.approve is not None:
+        graph.add_node("approve", traced("approve", nodes.approve))  # type: ignore[call-overload]
+        graph.add_conditional_edges("agent", after_agent)
+        graph.add_conditional_edges("approve", after_approve)
+    else:
+        # Without an approve node, `act` refuses consequential calls (see `nodes/act.py`).
+        graph.add_conditional_edges(
+            "agent", lambda state: "act" if after_agent(state) == "approve" else after_agent(state)
+        )
     graph.add_edge("act", "agent")
     graph.add_conditional_edges("answer", after_answer)
     graph.add_conditional_edges("verify", make_after_verify(max_attempts))

@@ -8,7 +8,11 @@ from typing import Any, Protocol
 from litellm import arerank
 
 from insightflow.core.exceptions import ProviderConfigurationError, ProviderError
-from insightflow.providers.llm import report_response_usage, translate_provider_errors
+from insightflow.providers.llm import (
+    report_response_usage,
+    request_options,
+    translate_provider_errors,
+)
 
 
 @dataclass(frozen=True)
@@ -32,24 +36,28 @@ class RerankProvider(Protocol):
 class LiteLLMRerankProvider:
     """Call any LiteLLM-supported hosted reranker (Cohere, NVIDIA NIM, Jina, Voyage, ...)."""
 
-    def __init__(self, model: str, api_key: str | None = None, api_base: str | None = None) -> None:
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        *,
+        max_retries: int = 0,
+    ) -> None:
         normalized_model = model.strip()
         if not normalized_model:
             raise ProviderConfigurationError
         self._model = normalized_model
         self._api_key = api_key
         self._api_base = api_base
+        self._max_retries = max(0, max_retries)
 
     async def rerank(
         self, query: str, documents: Sequence[str], *, top_n: int
     ) -> list[RerankResult]:
         if not documents:
             return []
-        options: dict[str, str] = {}
-        if self._api_key:
-            options["api_key"] = self._api_key
-        if self._api_base:
-            options["api_base"] = self._api_base
+        options = request_options(self._api_key, self._api_base, self._max_retries)
         with translate_provider_errors():
             response = await arerank(
                 model=self._model,

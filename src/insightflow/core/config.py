@@ -1,8 +1,10 @@
 """Environment-backed application configuration."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,7 +23,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     log_format: Literal["text", "json"] = "text"
-    litellm_api_key: str | None = None
+    litellm_api_key: SecretStr | None = None
     litellm_api_base: str | None = None
     litellm_chat_model: str = ""
     litellm_embedding_model: str = ""
@@ -32,7 +34,7 @@ class Settings(BaseSettings):
     embedding_query_input_type: str = ""
     embedding_document_input_type: str = ""
     qdrant_url: str = "http://localhost:6333"
-    qdrant_api_key: str | None = None
+    qdrant_api_key: SecretStr | None = None
     qdrant_collection: str = "insightflow_documents"
     qdrant_vector_name: str = "dense"
     qdrant_sparse_vector_name: str = "sparse"
@@ -61,7 +63,7 @@ class Settings(BaseSettings):
     rag_query_expansion: Literal["off", "multi_query", "decompose"] = "off"
     rag_query_expansion_max_queries: int = Field(default=3, ge=2, le=6)
     litellm_rerank_model: str = ""
-    litellm_rerank_api_key: str | None = None
+    litellm_rerank_api_key: SecretStr | None = None
     litellm_rerank_api_base: str | None = None
     rag_rerank_top_n: int = Field(default=6, ge=1, le=100)
     rag_corrective_retrieval_enabled: bool = False
@@ -98,6 +100,36 @@ class Settings(BaseSettings):
     # Prompts, model outputs, questions, and answers go to Langfuse only when this is true.
     langfuse_capture_content: bool = False
     langfuse_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    # Stage 8: security and production readiness (see "Security" in README.md).
+    # None: on outside production, off in production.
+    api_docs_enabled: bool | None = None
+    max_request_bytes: int = Field(default=65_536, ge=1024, le=10_485_760)
+    provider_max_retries: int = Field(default=2, ge=0, le=5)
+    auth_enabled: bool = False
+    # Comma-separated allowlist, for example RS256 or HS256. "none" is always refused.
+    auth_jwt_algorithms: str = "RS256"
+    auth_jwks_url: str = ""
+    auth_jwt_secret: SecretStr | None = None
+    auth_jwt_issuer: str = ""
+    auth_jwt_audience: str = ""
+    auth_jwt_leeway_seconds: int = Field(default=30, ge=0, le=300)
+    redis_url: SecretStr | None = None
+    rate_limit_enabled: bool = False
+    rate_limit_requests_per_minute: int = Field(default=30, ge=1, le=10_000)
+    rate_limit_burst: int = Field(default=10, ge=1, le=1000)
+    rate_limit_fail_open: bool = False
+    # Per user and UTC day. 0: no quota.
+    quota_daily_requests: int = Field(default=0, ge=0)
+    quota_daily_tokens: int = Field(default=0, ge=0)
+    guard_input_action: Literal["flag", "block"] = "flag"
+    guard_web_action: Literal["drop", "flag"] = "drop"
+    guard_datamark_web: bool = False
+    guard_answer_max_chars: int = Field(default=8000, ge=500, le=100_000)
+    # Hosted content-safety classifier (Llama Guard style) through LiteLLM. Empty: off.
+    guard_safety_model: str = ""
+    guard_safety_api_key: SecretStr | None = None
+    guard_safety_api_base: str | None = None
+    thread_retention_days: int = Field(default=30, ge=1, le=3650)
 
     @model_validator(mode="after")
     def validate_rag_token_limits(self) -> Self:
@@ -129,18 +161,99 @@ class Settings(BaseSettings):
             raise ValueError(
                 "LANGFUSE_ENABLED requires LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY"
             )
+        self._validate_security()
         return self
 
+    def _validate_security(self) -> None:
+        """Reject incoherent Stage 8 settings and an unprotected production profile."""
+        if self.auth_enabled:
+            has_secret = bool(secret_text(self.auth_jwt_secret))
+            has_jwks = bool(self.auth_jwks_url.strip())
+            if has_secret == has_jwks:
+                raise ValueError(
+                    "AUTH_ENABLED requires exactly one of AUTH_JWT_SECRET and AUTH_JWKS_URL"
+                )
+            algorithms = self.jwt_algorithms
+            if not algorithms:
+                raise ValueError("AUTH_JWT_ALGORITHMS must name at least one algorithm")
+            symmetric = [name for name in algorithms if name.startswith("HS")]
+            if has_secret and len(symmetric) != len(algorithms):
+                raise ValueError("AUTH_JWT_SECRET supports only HS256, HS384, and HS512")
+            if has_jwks and symmetric:
+                raise ValueError("AUTH_JWKS_URL supports only asymmetric algorithms")
+            if has_secret and len(secret_text(self.auth_jwt_secret) or "") < 32:
+                raise ValueError("AUTH_JWT_SECRET must have at least 32 characters")
+        if self.rate_limit_enabled and not secret_text(self.redis_url):
+            raise ValueError("RATE_LIMIT_ENABLED requires REDIS_URL")
+        if self.is_production:
+            missing = [
+                name
+                for name, ok in (
+                    ("AUTH_ENABLED=true", self.auth_enabled),
+                    ("AUTH_JWT_ISSUER", bool(self.auth_jwt_issuer.strip())),
+                    ("AUTH_JWT_AUDIENCE", bool(self.auth_jwt_audience.strip())),
+                    ("RATE_LIMIT_ENABLED=true", self.rate_limit_enabled),
+                    ("LOG_FORMAT=json", self.log_format == "json"),
+                )
+                if not ok
+            ]
+            if missing:
+                raise ValueError("APP_ENV=production requires " + ", ".join(missing))
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() == "production"
+
+    @property
+    def docs_enabled(self) -> bool:
+        """Serve /docs, /redoc, and /openapi.json (default: everywhere except production)."""
+        if self.api_docs_enabled is not None:
+            return self.api_docs_enabled
+        return not self.is_production
+
+    @property
+    def jwt_algorithms(self) -> list[str]:
+        names = [name.strip() for name in self.auth_jwt_algorithms.split(",") if name.strip()]
+        if any(name.lower() == "none" for name in names):
+            raise ValueError("AUTH_JWT_ALGORITHMS must not contain none")
+        return names
+
     def secret_values(self) -> list[str]:
-        """The configured credentials, which logs must never contain."""
-        values = [self.litellm_api_key, self.litellm_rerank_api_key, self.qdrant_api_key]
-        for secret in (self.tavily_api_key, self.langfuse_secret_key):
-            if secret is not None:
-                values.append(secret.get_secret_value())
+        """The configured credentials, which logs and answers must never contain."""
+        values = [
+            secret_text(secret)
+            for secret in (
+                self.litellm_api_key,
+                self.litellm_rerank_api_key,
+                self.qdrant_api_key,
+                self.tavily_api_key,
+                self.langfuse_secret_key,
+                self.auth_jwt_secret,
+                self.guard_safety_api_key,
+                self.redis_url,
+            )
+        ]
+        redis_password = urlsplit(secret_text(self.redis_url) or "").password
+        values.append(redis_password)
         return [value for value in values if value]
+
+
+def secret_text(secret: SecretStr | None) -> str | None:
+    """The plain value of an optional secret, or `None` when it is unset or blank."""
+    if secret is None:
+        return None
+    value = secret.get_secret_value()
+    return value if value.strip() else None
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return one settings instance per process."""
+    """Return one settings instance per process.
+
+    `SECRETS_DIR` names a directory of secret files (Docker or Kubernetes secrets): a file named
+    after a setting, for example `litellm_api_key`, gives its value.
+    """
+    secrets_dir = os.environ.get("SECRETS_DIR", "").strip()
+    if secrets_dir:
+        return Settings(_secrets_dir=secrets_dir)  # type: ignore[call-arg]
     return Settings()

@@ -6,7 +6,7 @@ from uuid import uuid5
 from qdrant_client import AsyncQdrantClient, models
 
 from insightflow.agents.memory import RememberedTurn
-from insightflow.core.config import Settings
+from insightflow.core.config import Settings, secret_text
 from insightflow.core.exceptions import StorageError
 from insightflow.core.observability import store_call
 from insightflow.rag.identity import INSIGHTFLOW_RAG_NAMESPACE
@@ -26,7 +26,7 @@ class QdrantMemoryStore:
         self.collection_name = settings.memory_collection
         self._client = client or AsyncQdrantClient(
             url=settings.qdrant_url,
-            api_key=settings.qdrant_api_key or None,
+            api_key=secret_text(settings.qdrant_api_key),
         )
 
     async def save_turn(

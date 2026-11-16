@@ -4,6 +4,10 @@ Document passages and web pages share one numbering per turn, in the order they 
 observed; a passage or page that a later step returns again keeps its first number. The agent,
 answer, and verify prompts and the API response all use `number_sources`, so `[n]` in an answer
 matches the `citation` of its source.
+
+Passage text, page text, and tool output are untrusted: `render_observations` puts each one in
+a spotlight block (`guardrails/spotlight.py`) whose tag only that prompt's nonce can close. The
+citation number and the source line stay outside the block.
 """
 
 import json
@@ -11,8 +15,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from insightflow.agents.models import SEARCH_TOOL, Observation
+from insightflow.guardrails.spotlight import (
+    DATAMARK_NOTE,
+    new_nonce,
+    safe_label,
+    wrap_untrusted,
+)
+from insightflow.guardrails.text import clean
 from insightflow.rag.models import RetrievedChunk
-from insightflow.rag.retrieval import render_context_block
+from insightflow.rag.retrieval import render_context_header
 from insightflow.tools.models import ToolSpec, WebSource
 
 TOOL_DESCRIPTION_MAX_CHARS = 300
@@ -69,10 +80,20 @@ def number_sources(observations: Sequence[Observation]) -> list[NumberedSource]:
     return sources
 
 
-def render_observations(observations: Sequence[Observation]) -> str:
-    """Render each step with its call, outcome, and newly numbered sources."""
+def render_observations(
+    observations: Sequence[Observation],
+    *,
+    nonce: str | None = None,
+    datamark_web: bool = False,
+) -> str:
+    """Render each step with its call, outcome, and newly numbered sources.
+
+    Untrusted text is put in spotlight blocks with `nonce` (a new random one by default);
+    `datamark_web` also datamarks web page text and adds a note that explains the marker.
+    """
     if not observations:
         return "No observations yet."
+    nonce = nonce or new_nonce()
     numbers = {source_key(source): source.number for source in number_sources(observations)}
     shown: set[str] = set()
     blocks: list[str] = []
@@ -81,7 +102,8 @@ def render_observations(observations: Sequence[Observation]) -> str:
         arguments = json.dumps(result.arguments, ensure_ascii=False, sort_keys=True)
         header = f"Step {step}: {result.tool} {arguments}"
         if result.status == "error":
-            blocks.append(f"{header} failed ({result.error}): {result.output}")
+            output = wrap_untrusted(result.output, "tool", nonce)
+            blocks.append(f"{header} failed ({result.error}):\n{output}")
             continue
 
         items = observation_keys(observation)
@@ -89,29 +111,36 @@ def render_observations(observations: Sequence[Observation]) -> str:
             if _is_search(observation):
                 blocks.append(f"{header} found no sources.")
             else:
-                blocks.append(f"{header} returned: {result.output}")
+                blocks.append(f"{header} returned:\n{wrap_untrusted(result.output, 'tool', nonce)}")
             continue
 
         new = [key for key in items if key not in shown]
         repeated = sorted({numbers[key] for key in items if key in shown})
         lines = [f"{header} returned sources:"]
-        lines.extend(_render_source(key, numbers[key], observation) for key in new)
+        lines.extend(
+            _render_source(key, numbers[key], observation, nonce, datamark_web) for key in new
+        )
         if repeated:
             lines.append("Already shown: " + ", ".join(f"[{number}]" for number in repeated))
         shown.update(new)
         blocks.append("\n".join(lines))
-    return "\n\n".join(blocks)
+    rendered = "\n\n".join(blocks)
+    if datamark_web and any(observation.result.web_sources for observation in observations):
+        rendered = f"{DATAMARK_NOTE}\n\n{rendered}"
+    return rendered
 
 
 def render_tool_catalog(specs: Sequence[ToolSpec]) -> str:
     """List tools with clipped descriptions and their input schemas."""
     lines = []
     for spec in specs:
-        description = spec.description.strip().replace("\n", " ")
+        # Descriptions come from tool servers: remove hidden text ("tool poisoning").
+        description = clean(spec.description).strip().replace("\n", " ")
         if len(description) > TOOL_DESCRIPTION_MAX_CHARS:
             description = description[: TOOL_DESCRIPTION_MAX_CHARS - 3] + "..."
         schema = json.dumps(spec.input_schema, sort_keys=True)
-        lines.append(f"- {spec.name}: {description}\n  input schema: {schema}")
+        approval = " (each call waits for the user's approval)" if spec.consequential else ""
+        lines.append(f"- {spec.name}{approval}: {description}\n  input schema: {schema}")
     return "\n".join(lines)
 
 
@@ -137,9 +166,13 @@ def _is_search(observation: Observation) -> bool:
     return observation.result.tool == SEARCH_TOOL
 
 
-def _render_source(key: str, number: int, observation: Observation) -> str:
+def _render_source(
+    key: str, number: int, observation: Observation, nonce: str, datamark_web: bool
+) -> str:
     passage = next((p for p in observation.passages if passage_key(p) == key), None)
     if passage is not None:
-        return render_context_block(number, passage)
+        content = wrap_untrusted(passage.chunk.content, "document", nonce)
+        return f"{render_context_header(number, passage)}\n{content}"
     page = next(p for p in observation.result.web_sources if page_key(p) == key)
-    return f"[{number}] {page.title} ({page.url})\n{page.content}"
+    content = wrap_untrusted(page.content, "web", nonce, datamark=datamark_web)
+    return f"[{number}] {safe_label(page.title)} ({safe_label(page.url, 500)})\n{content}"

@@ -7,9 +7,10 @@ from fastapi import Depends, Request
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from insightflow.agents.memory import ConversationMemory
-from insightflow.core.config import Settings, get_settings
+from insightflow.core.config import Settings, get_settings, secret_text
 from insightflow.core.exceptions import ProviderConfigurationError
 from insightflow.core.observability import NullTraceSink, TraceSink
+from insightflow.guardrails.classifier import LlamaGuardClassifier, SafetyClassifier
 from insightflow.providers.embeddings import EmbeddingProvider, LiteLLMEmbeddingProvider
 from insightflow.providers.instrumented import (
     instrument_chat,
@@ -22,8 +23,10 @@ from insightflow.rag.composition import build_retriever
 from insightflow.rag.config import RetrievalConfig
 from insightflow.rag.protocols import ContextAssembler, Retriever
 from insightflow.rag.retrieval import BudgetedContextAssembler
+from insightflow.security.rate_limit import RateLimiter, RedisRateLimiter
 from insightflow.storage.qdrant import QdrantStore
 from insightflow.storage.qdrant_memory import QdrantMemoryStore
+from insightflow.storage.redis import create_redis_client
 from insightflow.tools.calculator_server import SERVER_NAME as CALCULATOR_SERVER
 from insightflow.tools.calculator_server import TOOL_NAME as CALCULATOR_TOOL
 from insightflow.tools.calculator_server import create_calculator_server
@@ -38,8 +41,9 @@ def get_chat_provider(settings: SettingsDependency) -> ChatProvider:
     """Build the configured chat provider behind its application protocol."""
     return LiteLLMChatProvider(
         model=settings.litellm_chat_model,
-        api_key=settings.litellm_api_key,
+        api_key=secret_text(settings.litellm_api_key),
         api_base=settings.litellm_api_base,
+        max_retries=settings.provider_max_retries,
     )
 
 
@@ -49,10 +53,11 @@ def get_embedding_provider(settings: SettingsDependency) -> EmbeddingProvider:
         raise ProviderConfigurationError
     return LiteLLMEmbeddingProvider(
         model=settings.litellm_embedding_model,
-        api_key=settings.litellm_api_key,
+        api_key=secret_text(settings.litellm_api_key),
         api_base=settings.litellm_api_base,
         query_input_type=settings.embedding_query_input_type,
         document_input_type=settings.embedding_document_input_type,
+        max_retries=settings.provider_max_retries,
     )
 
 
@@ -62,8 +67,10 @@ def get_rerank_provider(settings: SettingsDependency) -> RerankProvider | None:
         return None
     return LiteLLMRerankProvider(
         model=settings.litellm_rerank_model,
-        api_key=settings.litellm_rerank_api_key or settings.litellm_api_key,
+        api_key=secret_text(settings.litellm_rerank_api_key)
+        or secret_text(settings.litellm_api_key),
         api_base=settings.litellm_rerank_api_base,
+        max_retries=settings.provider_max_retries,
     )
 
 
@@ -192,7 +199,9 @@ def create_tool_set(settings: Settings) -> ToolSet:
             timeout_seconds=settings.tool_timeout_seconds,
             max_output_chars=settings.tool_max_output_chars,
         )
-        registrations.append(ToolRegistration(client=calculator))
+        registrations.append(
+            ToolRegistration(client=calculator, read_only_tools=frozenset({CALCULATOR_TOOL}))
+        )
     if settings.tool_web_search_enabled and settings.tavily_api_key is not None:
         registrations.append(
             create_tavily_registration(
@@ -246,3 +255,44 @@ def get_trace_sink(request: Request) -> TraceSink:
 
 
 TraceSinkDependency = Annotated[TraceSink, Depends(get_trace_sink)]
+
+
+def create_rate_limiter(settings: Settings) -> RedisRateLimiter | None:
+    """The Redis rate limiter when `RATE_LIMIT_ENABLED`, else `None` (no limits)."""
+    url = secret_text(settings.redis_url)
+    if not settings.rate_limit_enabled or url is None:
+        return None
+    return RedisRateLimiter(
+        create_redis_client(url),
+        requests_per_minute=settings.rate_limit_requests_per_minute,
+        burst=settings.rate_limit_burst,
+        daily_requests=settings.quota_daily_requests,
+        daily_tokens=settings.quota_daily_tokens,
+        fail_open=settings.rate_limit_fail_open,
+    )
+
+
+def get_rate_limiter(request: Request) -> RateLimiter | None:
+    """The limiter opened at startup, or `None` (no lifespan, or limits disabled)."""
+    limiter: RateLimiter | None = getattr(request.app.state, "rate_limiter", None)
+    return limiter
+
+
+RateLimiterDependency = Annotated[RateLimiter | None, Depends(get_rate_limiter)]
+
+
+def get_safety_classifier(settings: SettingsDependency) -> SafetyClassifier | None:
+    """The hosted content-safety classifier when `GUARD_SAFETY_MODEL` is set."""
+    model = settings.guard_safety_model.strip()
+    if not model:
+        return None
+    provider = LiteLLMChatProvider(
+        model=model,
+        api_key=secret_text(settings.guard_safety_api_key) or secret_text(settings.litellm_api_key),
+        api_base=settings.guard_safety_api_base,
+        max_retries=settings.provider_max_retries,
+    )
+    return LlamaGuardClassifier(instrument_chat(provider, model=model))
+
+
+SafetyClassifierDependency = Annotated[SafetyClassifier | None, Depends(get_safety_classifier)]

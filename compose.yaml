@@ -14,6 +14,71 @@ services:
       retries: 5
       start_period: 10s
 
+  # Rate limits and quotas (RATE_LIMIT_ENABLED). Needs ./secrets/redis_password:
+  #   mkdir -p secrets && openssl rand -hex 24 > secrets/redis_password
+  redis:
+    image: redis:8.4.0-alpine
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$(cat /run/secrets/redis_password)"
+    ports:
+      - "127.0.0.1:6379:6379"
+    secrets:
+      - redis_password
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" ping | grep -q PONG
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # The API image: docker compose --profile app up -d --build
+  # Settings come from .env; secrets can also be files in ./secrets (see SECRETS_DIR in README).
+  api:
+    profiles: ["app"]
+    build:
+      context: .
+      target: api
+    image: insightflow-api:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      SECRETS_DIR: /run/secrets
+    secrets:
+      - redis_url
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - app_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+secrets:
+  redis_password:
+    file: ./secrets/redis_password
+  # redis://:<password>@redis:6379/0 (read as REDIS_URL through SECRETS_DIR).
+  redis_url:
+    file: ./secrets/redis_url
+
 volumes:
   qdrant_data:
-
+  redis_data:
+  app_data:

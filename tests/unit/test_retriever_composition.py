@@ -223,6 +223,8 @@ def test_rerank_provider_is_built_only_with_a_model() -> None:
         _env_file=None,
         litellm_rerank_model="cohere/rerank-test",
         litellm_api_key="chat-key",
+        # Explicit: LiteLLM loads `.env` into the environment, which can set a rerank key.
+        litellm_rerank_api_key=None,
         litellm_rerank_api_base="https://rerank.test",
     )
 

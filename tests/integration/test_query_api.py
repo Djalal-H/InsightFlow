@@ -184,6 +184,8 @@ async def test_query_answers_from_retrieved_context_with_sources() -> None:
     assert usage["errors"] == {}
     assert set(usage["node_timings_ms"]) == {"agent", "act", "answer", "verify", "finalize"}
     assert body == {
+        "status": "completed",
+        "pending_approval": None,
         "answer": "InsightFlow is a RAG platform [1].",
         "thread_id": None,
         "verification": {"status": "passed", "method": "deterministic", "issues": []},
@@ -205,6 +207,7 @@ async def test_query_answers_from_retrieved_context_with_sources() -> None:
             ],
             "nodes": DEFAULT_NODES,
             "recalled_turns": 0,
+            "guardrails": [],
         },
         "sources": [
             {
@@ -222,9 +225,10 @@ async def test_query_answers_from_retrieved_context_with_sources() -> None:
     assert [query.text for query in retriever.queries] == ["What is InsightFlow?"]
     assert retriever.queries[0].top_k == 12
     assert provider.messages is not None
-    assert provider.messages[0] == {"role": "system", "content": GROUNDED_SYSTEM_PROMPT}
+    assert provider.messages[0]["content"].startswith(GROUNDED_SYSTEM_PROMPT)
     user_prompt = provider.messages[1]["content"]
-    assert "[1] PDF/overview.pdf (page 2)\nInsightFlow is an API-first RAG platform." in user_prompt
+    assert "[1] PDF/overview.pdf (page 2)\n<untrusted-" in user_prompt
+    assert "\nInsightFlow is an API-first RAG platform.\n</untrusted-" in user_prompt
     assert user_prompt.endswith("Question: What is InsightFlow?")
 
 
