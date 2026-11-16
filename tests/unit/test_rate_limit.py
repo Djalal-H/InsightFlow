@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -16,7 +16,10 @@ from insightflow.core.exceptions import (
 )
 from insightflow.security.rate_limit import KEY_PREFIX, RedisRateLimiter
 
-NOON = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+# Noon tomorrow (UTC): the quota keys expire at the end of that day, which is always in the
+# future for the real clock that fakeredis uses for EXPIREAT.
+NOON = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1)
+TODAY = NOON.strftime("%Y%m%d")
 
 
 def limiter(client: Any | None = None, **values: Any) -> RedisRateLimiter:
@@ -67,7 +70,7 @@ async def test_a_refused_request_does_not_use_the_request_quota() -> None:
     await rate.acquire("user-a")
     with pytest.raises(RateLimitExceededError):
         await rate.acquire("user-a")
-    assert await client.get(f"{KEY_PREFIX}:requests:20261115:user-a") == "1"
+    assert await client.get(f"{KEY_PREFIX}:requests:{TODAY}:user-a") == "1"
 
 
 async def test_the_token_quota_counts_charged_tokens() -> None:
@@ -81,7 +84,7 @@ async def test_the_token_quota_counts_charged_tokens() -> None:
     with pytest.raises(QuotaExceededError) as error:
         await rate.acquire("user-a")
     assert error.value.quota == "tokens"
-    key = f"{KEY_PREFIX}:tokens:20261115:user-a"
+    key = f"{KEY_PREFIX}:tokens:{TODAY}:user-a"
     assert await client.get(key) == "120"
     assert await client.ttl(key) > 0
 

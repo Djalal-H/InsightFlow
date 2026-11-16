@@ -708,6 +708,8 @@
   - `tests/unit/test_retriever_composition.py` printed the value of `LITELLM_RERANK_API_KEY` from `.env` in an assertion message (LiteLLM loads `.env` into the environment); the test now sets the key explicitly. The value appeared only in the local test output.
   - The screen had a bug (a generator is always true, so every Base64 run counted as a payload); the benign Base64 case of the regression set found it.
   - In-process, one request costs about 17 ms of CPU in the app (graph build, routing, guards) besides the model calls; throughput is bounded by one process's event loop.
+  - First CI run on GitHub (PR #12): all jobs passed except `pip-audit`, which found three known vulnerabilities in `litellm 1.92.0` (fixed from 1.100.4). Pinned `litellm==1.100.5` in `requirements.txt` and regenerated both lock files with the commands in README; `uvx --python 3.13 pip-audit==2.10.0 --requirement requirements.lock --no-deps --disable-pip` — passed: no known vulnerabilities; default suite 773 passed with the new version.
+  - `tests/unit/test_rate_limit.py` used a fixed clock date (2026-11-15) while fakeredis applies `EXPIREAT` on the real clock, so three tests failed once that day had passed; the test clock is now noon tomorrow (UTC).
 - Decisions:
   - Secure defaults stay off outside production (auth, rate limits) so local work and the existing tests need no token; production refuses to start without them.
   - Tools are consequential unless the registration lists them as read-only; MCP `readOnlyHint` is not trusted.

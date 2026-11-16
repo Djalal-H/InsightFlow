@@ -41,6 +41,12 @@ backoff==2.2.1
     # via langfuse
 beautifulsoup4==4.15.0
     # via docling-slim
+boto3==1.44.3
+    # via litellm
+botocore==1.44.3
+    # via
+    #   boto3
+    #   s3transfer
 certifi==2026.10.23
     # via
     #   docling-slim
@@ -174,6 +180,10 @@ jinja2==3.1.6
     #   torch
 jiter==0.19.0
     # via openai
+jmespath==1.1.0
+    # via
+    #   boto3
+    #   botocore
 jsonlines==4.0.0
     # via docling-ibm-models
 jsonpatch==1.47
@@ -220,7 +230,7 @@ langsmith==0.14.17
     # via langchain-core
 latex2mathml==3.81.1
     # via docling-core
-litellm==1.92.0
+litellm==1.100.5
     # via -r requirements.txt
 lxml==6.1.3
     # via
@@ -375,6 +385,7 @@ pydantic-settings==2.14.2
     #   -r requirements.txt
     #   docling-core
     #   docling-slim
+    #   litellm
 pygments==2.21.0
     # via
     #   mpire
@@ -389,8 +400,10 @@ pypdf==6.14.2
     # via -r requirements-ingest.txt
 pypdfium2==5.15.2
     # via docling-slim
-python-dateutil==4.0.0
-    # via pandas
+python-dateutil==2.9.0.post0
+    # via
+    #   botocore
+    #   pandas
 python-docx==1.2.0
     # via docling-slim
 python-dotenv==1.2.4
@@ -455,6 +468,8 @@ rtree==1.4.1
     # via
     #   docling-ibm-models
     #   docling-slim
+s3transfer==0.19.3
+    # via boto3
 safetensors==0.8.0
     # via
     #   accelerate
@@ -471,7 +486,9 @@ shapely==2.2.0
 shellingham==1.5.4
     # via typer
 six==1.17.0
-    # via rapidocr
+    # via
+    #   python-dateutil
+    #   rapidocr
 sniffio==1.3.1
     # via
     #   langsmith
@@ -594,13 +611,13 @@ typing-inspection==0.4.5
     #   mcp
     #   pydantic
     #   pydantic-settings
-tzdata==2026.6
+tzdata==2026.6 ; sys_platform == 'emscripten' or sys_platform == 'win32'
     # via
     #   faker
     #   pandas
-    #   python-dateutil
 urllib3==2.8.0
     # via
+    #   botocore
     #   qdrant-client
     #   requests
 uuid-utils==0.19.0
