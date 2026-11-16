@@ -57,7 +57,7 @@ flowchart LR
     end
 
     subgraph brain["Agent layer (LangGraph)"]
-        graph["ReAct workflow<br/>agent · act · answer · verify"]
+        wf["ReAct workflow<br/>agent · act · answer · verify"]
         guard["Guardrails<br/>screen · spotlight · canary"]
         ckpt[("Checkpointer<br/>SQLite")]
     end
@@ -80,17 +80,17 @@ flowchart LR
     langfuse["Langfuse<br/>(optional)"]
 
     client --> mw
-    routes --> graph
+    routes --> wf
     sec -.-> redis
-    graph <--> guard
-    graph <--> ckpt
-    graph --> chain
-    graph --> calc
-    graph --> web
-    graph --> llm
+    wf <--> guard
+    wf <--> ckpt
+    wf --> chain
+    wf --> calc
+    wf --> web
+    wf --> llm
     chain --> llm
     chain --> qdrant
-    graph -.-> qdrant
+    wf -.-> qdrant
     routes -.-> langfuse
 ```
 
@@ -101,8 +101,8 @@ tested without a model.
 
 ```mermaid
 flowchart TD
-    start([POST /query]) --> recall{{"recall<br/>(memory on)"}}
-    start --> agent
+    begin([POST /query]) --> recall{{"recall<br/>(memory on)"}}
+    begin --> agent
     recall --> agent
 
     agent["<b>agent</b><br/>choose one JSON action:<br/>tool call or answer"]
